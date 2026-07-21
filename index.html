@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Hard privacy guarantee: no network destinations are allowed at all.
+       The app cannot phone home even if it wanted to. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' blob:; media-src blob:; style-src 'self'; script-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; object-src 'none'; base-uri 'self'">
+  <title>OutfitMemory</title>
+  <meta name="description" content="A private, local-first outfit journal. One photo a day — your photos never leave your device.">
+  <meta name="theme-color" content="#ffffff">
+
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="icons/icon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="OutfitMemory">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+
+  <script src="js/theme-init.js"></script>
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/themes.css">
+</head>
+<body>
+  <noscript>
+    <p>OutfitMemory is a local-first app and needs JavaScript to manage your photo archive on-device.</p>
+  </noscript>
+
+  <!-- Main app chrome (hidden until setup is complete) -->
+  <div id="app" hidden>
+    <header id="topbar" class="topbar"></header>
+    <main id="view"></main>
+    <nav id="tabbar" class="tabbar" aria-label="Main navigation"></nav>
+  </div>
+
+  <!-- Full-screen states: onboarding / unlock -->
+  <div id="screen" hidden></div>
+
+  <!-- Overlay layer: sheets, dialogs, lightbox, capture, wrapped -->
+  <div id="layer"></div>
+
+  <!-- Toasts -->
+  <div id="toasts" aria-live="polite"></div>
+
+  <!-- Native pickers. `capture` opens the system camera on phones. -->
+  <input type="file" id="fileCamera" accept="image/*" capture="environment" hidden>
+  <input type="file" id="fileLibrary" accept="image/*" hidden>
+  <input type="file" id="fileImport" accept=".zip,.json,application/zip,application/json" hidden>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

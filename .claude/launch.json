@@ -1,0 +1,18 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "outfitmemory",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "3090",
+        "--directory",
+        "/Users/atli/Desktop/Coding/OutfitMemory"
+      ],
+      "autoPort": false,
+      "port": 3090
+    }
+  ]
+}

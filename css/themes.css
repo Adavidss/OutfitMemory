@@ -1,0 +1,148 @@
+/* ============================================================
+   OutfitMemory — themes.css
+   Theme token overrides. The default (light, Apple-like) lives
+   in base.css. Switch via <html data-theme="...">.
+   Themes: light · dark · mono · magazine · polaroid
+   ============================================================ */
+
+/* ---------- Dark ---------- */
+[data-theme="dark"] {
+  --bg: #0b0b0f;
+  --surface: #17171d;
+  --surface-2: #22222a;
+  --ink: #f2f2f5;
+  --ink-2: #9d9da6;
+  --ink-3: #62626c;
+  --line: rgba(255, 255, 255, 0.09);
+  --accent: #8b7bff;
+  --on-accent: #ffffff;
+  --scrim: rgba(0, 0, 0, 0.65);
+  --tabbar-bg: rgba(11, 11, 15, 0.82);
+  --shadow-1: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 6px 18px rgba(0, 0, 0, 0.5), 0 16px 48px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+/* ---------- Mono (minimal black & white) ---------- */
+[data-theme="mono"] {
+  --bg: #ffffff;
+  --surface: #f7f7f7;
+  --surface-2: #ebebeb;
+  --ink: #000000;
+  --ink-2: #555555;
+  --ink-3: #999999;
+  --line: rgba(0, 0, 0, 0.14);
+  --accent: #000000;
+  --on-accent: #ffffff;
+  --brand-grad: linear-gradient(135deg, #000000, #3a3a3a);
+  --danger: #000000;
+  --star: #000000;
+  --radius: 6px;
+  --radius-lg: 10px;
+  --radius-sm: 4px;
+  --tabbar-bg: rgba(255, 255, 255, 0.92);
+}
+[data-theme="mono"] .fab { box-shadow: 0 6px 16px rgba(0, 0, 0, 0.3); }
+[data-theme="mono"] .empty-art,
+[data-theme="mono"] .ob-logo { box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28); }
+[data-theme="mono"] .btn-hero { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.25); }
+
+/* ---------- Magazine (retro fashion editorial) ---------- */
+[data-theme="magazine"] {
+  --bg: #f6f1e7;
+  --surface: #fffdf7;
+  --surface-2: #ece5d6;
+  --ink: #191612;
+  --ink-2: #6d655a;
+  --ink-3: #a49b8c;
+  --line: rgba(25, 22, 18, 0.16);
+  --accent: #c8372d;
+  --on-accent: #fffdf7;
+  --brand-grad: linear-gradient(135deg, #c8372d, #e8853d);
+  --danger: #c8372d;
+  --star: #c8372d;
+  --radius: 4px;
+  --radius-lg: 6px;
+  --radius-sm: 2px;
+  --scrim: rgba(25, 22, 18, 0.5);
+  --tabbar-bg: rgba(246, 241, 231, 0.9);
+  --font-display: "Didot", "Bodoni 72", "Playfair Display", "Times New Roman", Georgia, serif;
+}
+[data-theme="magazine"] .month-head h2,
+[data-theme="magazine"] .view-title,
+[data-theme="magazine"] .cal-title,
+[data-theme="magazine"] .onboard h1 {
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-style: italic;
+}
+[data-theme="magazine"] .brand { font-style: italic; letter-spacing: 0.02em; }
+[data-theme="magazine"] .thumb-card { border-radius: 2px; }
+[data-theme="magazine"] .fab { box-shadow: 0 6px 16px rgba(200, 55, 45, 0.4); }
+[data-theme="magazine"] .empty-art,
+[data-theme="magazine"] .ob-logo { box-shadow: 0 14px 34px rgba(200, 55, 45, 0.3); }
+[data-theme="magazine"] .btn-hero { box-shadow: 0 6px 18px rgba(200, 55, 45, 0.3); }
+
+/* ---------- Polaroid (scrapbook) ---------- */
+[data-theme="polaroid"] {
+  --bg: #efe7da;
+  --surface: #faf6ee;
+  --surface-2: #e3d9c8;
+  --ink: #2b2620;
+  --ink-2: #6f6558;
+  --ink-3: #a3988a;
+  --line: rgba(43, 38, 32, 0.13);
+  --accent: #d96a4e;
+  --on-accent: #fffdf7;
+  --brand-grad: linear-gradient(135deg, #d96a4e, #e8a13d);
+  --danger: #c94f3d;
+  --star: #e8a13d;
+  --scrim: rgba(43, 38, 32, 0.5);
+  --tabbar-bg: rgba(239, 231, 218, 0.9);
+  --font-caption: "Bradley Hand", "Marker Felt", "Segoe Print", "Comic Sans MS", cursive;
+}
+/* Subtle paper texture via layered gradients (no external assets) */
+[data-theme="polaroid"] body {
+  background-image:
+    radial-gradient(rgba(43, 38, 32, 0.028) 1px, transparent 1px),
+    radial-gradient(rgba(255, 255, 255, 0.5) 1px, transparent 1px);
+  background-size: 22px 22px, 34px 34px;
+  background-position: 0 0, 11px 11px;
+}
+[data-theme="polaroid"] .grid { gap: 14px; row-gap: 20px; }
+[data-theme="polaroid"] .thumb-card {
+  aspect-ratio: auto;
+  background: #fffdf8;
+  border-radius: 3px;
+  padding: 7px 7px 26px;
+  box-shadow: 0 2px 6px rgba(43, 38, 32, 0.18), 0 8px 20px rgba(43, 38, 32, 0.1);
+  overflow: visible;
+}
+[data-theme="polaroid"] .thumb-card:nth-child(3n + 1) { transform: rotate(-1.4deg); }
+[data-theme="polaroid"] .thumb-card:nth-child(3n + 2) { transform: rotate(1.1deg); }
+[data-theme="polaroid"] .thumb-card:nth-child(4n + 3) { transform: rotate(-0.6deg); }
+[data-theme="polaroid"] .thumb-card:hover { transform: rotate(0deg) translateY(-3px); }
+[data-theme="polaroid"] .thumb-ph { display: none; }
+[data-theme="polaroid"] .thumb-img {
+  position: static;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 3 / 3.4;
+  object-fit: cover;
+  border-radius: 1px;
+  background: var(--surface-2);
+}
+[data-theme="polaroid"] .thumb-cap {
+  display: block;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 4px;
+  text-align: center;
+  font-family: var(--font-caption);
+  font-size: 12.5px;
+  color: #6f6558;
+}
+[data-theme="polaroid"] .fav-badge { top: 11px; right: 11px; }
+[data-theme="polaroid"] .memory-title,
+[data-theme="polaroid"] .empty h2 { font-family: var(--font-caption); }

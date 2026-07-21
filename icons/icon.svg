@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <linearGradient id="g" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="512" y2="512">
+      <stop offset="0" stop-color="#7C5CFF"/>
+      <stop offset="1" stop-color="#FF7AA2"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="120" fill="url(#g)"/>
+  <!-- camera body + top bump -->
+  <g fill="#ffffff">
+    <rect x="194" y="161" width="124" height="62" rx="26"/>
+    <rect x="102" y="181" width="308" height="216" rx="51"/>
+  </g>
+  <!-- heart-shaped lens punched through to the gradient -->
+  <path fill="url(#g)" d="M256 352c-3.2 0-6.3-1-8.9-3-19.4-14.6-57.1-42.3-57.1-72.6 0-22.6 17.1-39.8 38.1-39.8 10.9 0 20.6 5.5 27.9 14.6 7.3-9.1 17-14.6 27.9-14.6 21 0 38.1 17.2 38.1 39.8 0 30.3-37.7 58-57.1 72.6-2.6 2-5.7 3-8.9 3z"/>
+</svg>
