@@ -24,6 +24,7 @@ import { FolderStorage } from './storage/folderStorage.js';
 import { BrowserStorage } from './storage/browserStorage.js';
 import { todayStr, nowTime, computeStreaks } from './util/dates.js';
 import { zipFiles, readZip } from './util/zip.js';
+import { idbDel } from './util/idb.js';
 import { deriveFromExisting } from './imagePipeline.js';
 
 const SETTINGS_KEY = 'om.settings';
@@ -35,6 +36,7 @@ const DEFAULT_SETTINGS = {
   storageKind: null,      // 'folder' | 'browser'
   lastView: 'gallery',
   memoryDismissed: '',    // date the "on this day" banner was dismissed
+  backup: { preset: 'off', lastRun: '', folderName: '' }, // see js/backup.js
 };
 
 function freshMeta() {
@@ -452,6 +454,7 @@ class Store extends EventTarget {
     this.#dropUrlCache();
     if (this.adapter?.kind === 'browser') await this.adapter.wipe();
     await FolderStorage.forget();
+    await idbDel('kv', 'backupDir').catch(() => {}); // backup folder link too
     try {
       localStorage.removeItem(SETTINGS_KEY);
       localStorage.removeItem(META_CACHE_KEY);

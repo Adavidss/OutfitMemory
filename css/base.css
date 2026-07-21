@@ -43,7 +43,18 @@
   color-scheme: light;
 }
 
-html { -webkit-text-size-adjust: 100%; }
+html {
+  -webkit-text-size-adjust: 100%;
+  /* Kill double-tap-to-zoom on the whole app (pinch zoom still works). */
+  touch-action: manipulation;
+}
+
+/* iOS Safari auto-zooms the page when a focused form control's font is
+   under 16px — and leaves the user stranded zoomed-in. On touch devices,
+   force every control to 16px so the zoom never triggers. */
+@media (pointer: coarse) {
+  input, textarea, select { font-size: 16px !important; }
+}
 
 body {
   font-family: var(--font);

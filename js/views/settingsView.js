@@ -10,6 +10,10 @@ import { el, $, toast, progressToast, confirmDialog, sheet } from '../ui/dom.js'
 import { icon } from '../ui/icons.js';
 import { todayStr } from '../util/dates.js';
 import { applyTheme } from '../app.js';
+import {
+  backupSupported, backupNow, pickBackupFolder, getBackupHandle,
+  forgetBackupFolder, PRESET_LABELS,
+} from '../backup.js';
 
 const THEMES = [
   { id: 'auto', name: 'Auto', colors: ['#ffffff', '#0b0b0f', '#6a5ae0'] },
@@ -26,7 +30,7 @@ export function renderSettings(container) {
 
   container.append(themeGroup(container));
   container.append(storageGroup(container));
-  container.append(backupGroup());
+  container.append(backupGroup(container));
   container.append(aboutGroup());
   container.append(dangerGroup());
 }
@@ -133,8 +137,36 @@ async function changeFolder(container) {
 
 /* ---------- backup ---------- */
 
-function backupGroup() {
+function backupGroup(container) {
   const card = el('div', { class: 'set-card' });
+
+  /* --- automatic mirrored backups (Chromium only) --- */
+  if (backupSupported()) {
+    const b = store.settings.backup || {};
+    const enabled = b.preset && b.preset !== 'off';
+    card.append(rowButton('refresh', 'Automatic backups',
+      enabled
+        ? `${PRESET_LABELS[b.preset]} → “${b.folderName || 'backup folder'}”`
+        : 'Off — mirror your archive into a second folder',
+      () => configureAutoBackup(container)));
+    if (enabled) {
+      card.append(rowButton('check', 'Back up now',
+        b.lastRun ? `Last backup: ${new Date(b.lastRun).toLocaleString()}` : 'Never run yet',
+        async () => {
+          const pt = progressToast('Backing up…');
+          const r = await backupNow({
+            interactive: true,
+            onProgress: (i, n) => pt.update(`Backing up ${i}/${n}…`),
+          });
+          pt.done(r.ok
+            ? `Backed up ✓ ${r.copied} new file${r.copied === 1 ? '' : 's'}`
+            : r.reason === 'nofolder'
+              ? 'Choose a backup folder first'
+              : 'Backup folder needs permission — try again');
+          renderSettings(container);
+        }));
+    }
+  }
 
   card.append(rowButton('download', 'Export metadata (JSON)',
     'Dates, notes, tags, colors — no photos.', () => {
@@ -174,7 +206,57 @@ function backupGroup() {
     }));
 
   return group('Backup', card,
-    'Your archive is portable: the ZIP contains plain WebP/JPEG files and a human-readable metadata.json.');
+    backupSupported()
+      ? 'Automatic backups mirror new photos into your backup folder on a schedule — the backup folder is itself a complete archive you can open with “Choose Outfit Folder”. The ZIP export works everywhere.'
+      : 'Your archive is portable: the ZIP contains plain WebP/JPEG files and a human-readable metadata.json. (Automatic folder backups need desktop Chrome or Edge.)');
+}
+
+/** Preset/folder chooser for automatic backups. */
+async function configureAutoBackup(container) {
+  const b = store.settings.backup || {};
+  const hasFolder = !!(await getBackupHandle());
+  const choice = await sheet({
+    title: 'Automatic backups',
+    body: hasFolder
+      ? `Mirroring to “${b.folderName}”. Only new files are copied on each run.`
+      : 'Pick how often to mirror your archive (photos + metadata) into a backup folder you choose.',
+    actions: [
+      { key: 'change', label: PRESET_LABELS.change, icon: 'refresh', sub: 'Runs shortly after you save or edit' },
+      { key: 'daily', label: PRESET_LABELS.daily, icon: 'calendar' },
+      { key: 'weekly', label: PRESET_LABELS.weekly, icon: 'calendar' },
+      hasFolder && { key: 'folder', label: 'Change backup folder…', icon: 'folder' },
+      (b.preset && b.preset !== 'off') &&
+        { key: 'off', label: 'Turn off automatic backups', icon: 'x', danger: true },
+    ].filter(Boolean),
+  });
+  if (!choice) return;
+
+  if (choice.key === 'off') {
+    store.saveSettings({ backup: { ...store.settings.backup, preset: 'off' } });
+    toast('Automatic backups turned off');
+    return renderSettings(container);
+  }
+  if (choice.key === 'folder') {
+    const h = await pickBackupFolder();
+    if (h) toast(`Backups will mirror to “${h.name}”`);
+    return renderSettings(container);
+  }
+
+  // A preset was chosen: make sure a folder exists, then run right away.
+  if (!(await getBackupHandle())) {
+    const h = await pickBackupFolder();
+    if (!h) return; // cancelled — leave preset unchanged
+  }
+  store.saveSettings({ backup: { ...store.settings.backup, preset: choice.key } });
+  const pt = progressToast('Running first backup…');
+  const r = await backupNow({
+    interactive: true,
+    onProgress: (i, n) => pt.update(`Backing up ${i}/${n}…`),
+  });
+  pt.done(r.ok
+    ? `${PRESET_LABELS[choice.key]} backups on · ${r.copied} file${r.copied === 1 ? '' : 's'} mirrored ✓`
+    : 'Backups scheduled — first run will ask for folder access');
+  renderSettings(container);
 }
 
 /* ---------- about ---------- */

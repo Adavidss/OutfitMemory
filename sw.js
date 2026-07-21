@@ -7,7 +7,7 @@
  * touch the network at all.
  */
 
-const CACHE = 'outfitmemory-v1';
+const CACHE = 'outfitmemory-v2';
 
 // On localhost, serve network-first so local development always sees fresh
 // files (cache still works as an offline fallback). Production stays
@@ -24,6 +24,7 @@ const ASSETS = [
   './js/theme-init.js',
   './js/app.js',
   './js/store.js',
+  './js/backup.js',
   './js/imagePipeline.js',
   './js/colors.js',
   './js/ui/dom.js',
@@ -70,8 +71,10 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== location.origin) return; // CSP blocks these anyway
 
   if (DEV) {
+    // no-store also bypasses the HTTP heuristic cache, so edits show up
+    // on plain reload even under python -m http.server (no Cache-Control).
     event.respondWith(
-      fetch(request).catch(() =>
+      fetch(request, { cache: 'no-store' }).catch(() =>
         caches.match(request).then((hit) => hit || caches.match('./index.html'))
       )
     );

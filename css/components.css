@@ -980,6 +980,22 @@
   text-align: center;
 }
 .toast.out { opacity: 0; transform: translateY(8px); transition: all 0.25s ease; }
+.toast-action {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.toast-btn {
+  flex: none;
+  font-weight: 800;
+  font-size: 13.5px;
+  color: inherit;
+  background: color-mix(in srgb, var(--bg) 22%, transparent);
+  border: 1px solid color-mix(in srgb, var(--bg) 35%, transparent);
+  border-radius: 999px;
+  padding: 5px 13px;
+}
 
 /* ---------- Confetti ---------- */
 .confetti { position: fixed; inset: 0; z-index: 110; pointer-events: none; overflow: hidden; }

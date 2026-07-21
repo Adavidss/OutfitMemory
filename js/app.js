@@ -16,6 +16,7 @@ import { renderStats } from './views/statsView.js';
 import { renderSettings } from './views/settingsView.js';
 import { renderOnboarding, renderLocked } from './views/onboarding.js';
 import { openCapture } from './views/capture.js';
+import { initAutoBackup } from './backup.js';
 
 const VIEWS = {
   gallery: { render: renderGallery, icon: 'grid', label: 'Photos' },
@@ -114,6 +115,7 @@ function showApp() {
   buildChrome();
   renderView();
   handlePendingAction();
+  initAutoBackup(); // no-op unless a schedule is configured (idempotent)
 }
 
 function handlePendingAction() {

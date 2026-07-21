@@ -132,6 +132,20 @@ export function toast(msg, { ms = 2600 } = {}) {
   }, ms);
 }
 
+/** Toast with a tappable action button (e.g. "Backup due — Back up"). */
+export function actionToast(msg, btnLabel, onClick, { ms = 12000 } = {}) {
+  const btn = el('button', { class: 'toast-btn', text: btnLabel });
+  const t = el('div', { class: 'toast toast-action', role: 'status' },
+    el('span', { text: msg }), btn);
+  btn.addEventListener('click', () => { t.remove(); onClick(); });
+  $('#toasts').append(t);
+  setTimeout(() => {
+    t.classList.add('out');
+    setTimeout(() => t.remove(), 300);
+  }, ms);
+  return t;
+}
+
 /** Persistent toast for long operations. Returns {update, done}. */
 export function progressToast(initial) {
   const t = el('div', { class: 'toast', role: 'status', text: initial });
