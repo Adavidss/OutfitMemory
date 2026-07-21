@@ -31,6 +31,7 @@ export const ICONS = {
   refresh: S('<path d="M20 12a8 8 0 1 1-2.5-5.8M20 3.5V7h-3.5"/>'),
   lock: S('<rect x="5" y="10.5" width="14" height="10" rx="2.5"/><path d="M8 10.5V8a4 4 0 0 1 8 0v2.5"/><circle cx="12" cy="15.5" r="1.4" fill="currentColor" stroke="none"/>'),
   moon: S('<path d="M20 13.5A8.2 8.2 0 0 1 10.5 4 8.3 8.3 0 1 0 20 13.5Z"/>'),
+  shuffle: S('<path d="M3.5 7h3.2c1.1 0 2.1.5 2.8 1.4l5 6.2c.7.9 1.7 1.4 2.8 1.4h3.2M17.5 13l3 3-3 3M3.5 16h3.2c1.1 0 2.1-.5 2.8-1.4l.9-1.1M17.5 4l3 3-3 3M20.5 7h-3.2c-1.1 0-2.1.5-2.8 1.4l-.9 1.1"/>'),
   info: S('<circle cx="12" cy="12" r="8.8"/><path d="M12 11v5.2"/><circle cx="12" cy="7.8" r="1.1" fill="currentColor" stroke="none"/>'),
   palette: S('<path d="M12 21a9 9 0 1 1 9-9c0 2-1.3 3.2-3 3.2h-1.8c-1.4 0-2.2 1.4-1.4 2.6.8 1.2.2 3.2-2.8 3.2Z"/><circle cx="7.8" cy="10.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="7.5" r="1.2" fill="currentColor" stroke="none"/><circle cx="16.2" cy="10.5" r="1.2" fill="currentColor" stroke="none"/>'),
 };

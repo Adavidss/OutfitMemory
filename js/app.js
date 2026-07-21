@@ -16,7 +16,9 @@ import { renderStats } from './views/statsView.js';
 import { renderSettings } from './views/settingsView.js';
 import { renderOnboarding, renderLocked } from './views/onboarding.js';
 import { openCapture } from './views/capture.js';
+import { openDetail } from './views/detail.js';
 import { initAutoBackup } from './backup.js';
+import { toast } from './ui/dom.js';
 
 const VIEWS = {
   gallery: { render: renderGallery, icon: 'grid', label: 'Photos' },
@@ -68,17 +70,38 @@ const $$tabs = () => [...document.querySelectorAll('.tab[data-route]')];
 
 function buildChrome() {
   const topbar = $('#topbar');
+
+  // Flashback: open a random outfit from the archive.
+  const shuffleBtn = el('button', { class: 'icon-btn', 'aria-label': 'Random outfit flashback', title: 'Flashback' },
+    icon('shuffle'));
+  shuffleBtn.addEventListener('click', () => {
+    const entries = store.entries();
+    if (!entries.length) return toast('Save an outfit first ✨');
+    openDetail(entries[Math.floor(Math.random() * entries.length)].id);
+  });
+
+  // Streak chip doubles as a shortcut to Stats.
+  const streakChip = el('button', { class: 'streak-chip', id: 'streakChip', hidden: true, 'aria-label': 'Current streak — open stats' });
+  streakChip.addEventListener('click', () => { location.hash = '#/stats'; });
+
   topbar.replaceChildren(el('div', { class: 'topbar-inner' },
     el('div', { class: 'brand' },
       el('span', { class: 'brand-logo' }, icon('cameraHeart')),
       'OutfitMemory'),
-    el('div', { class: 'streak-chip', id: 'streakChip', hidden: true })));
+    el('div', { class: 'topbar-right' }, shuffleBtn, streakChip)));
 
   const mkTab = (route) => {
     const v = VIEWS[route];
     const b = el('button', { class: 'tab', dataset: { route }, 'aria-label': v.label },
       icon(v.icon), el('span', { text: v.label }));
-    b.addEventListener('click', () => { location.hash = `#/${route}`; });
+    b.addEventListener('click', () => {
+      // Re-tapping the active tab scrolls back to the top (mobile idiom).
+      if (currentRoute() === route && location.hash === `#/${route}`) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } else {
+        location.hash = `#/${route}`;
+      }
+    });
     return b;
   };
   const fab = el('button', { class: 'fab', 'aria-label': "Add Today's Outfit", title: "Add Today's Outfit" }, icon('plus'));

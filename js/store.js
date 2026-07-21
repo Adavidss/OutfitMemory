@@ -36,6 +36,7 @@ const DEFAULT_SETTINGS = {
   storageKind: null,      // 'folder' | 'browser'
   lastView: 'gallery',
   memoryDismissed: '',    // date the "on this day" banner was dismissed
+  gridDensity: 'cozy',    // 'cozy' | 'compact' gallery grid
   backup: { preset: 'off', lastRun: '', folderName: '' }, // see js/backup.js
 };
 
@@ -257,6 +258,25 @@ class Store extends EventTarget {
     this.meta.entries = this.meta.entries.filter((x) => x.id !== id);
     await this.#saveMeta();
     this.emit();
+  }
+
+  /** Put a just-deleted outfit back (Undo). Blobs were captured pre-delete. */
+  async restoreOutfit(entry, imageBlob, thumbBlob) {
+    if (this.entryById(entry.id)) return; // already back somehow
+    if (imageBlob) await this.adapter.writeFile(entry.image, imageBlob);
+    if (thumbBlob) await this.adapter.writeFile(entry.thumbnail, thumbBlob);
+    this.meta.entries.push(entry);
+    await this.#saveMeta();
+    this.emit();
+  }
+
+  /** All distinct tags, most-used first (for autocomplete). */
+  allTags() {
+    const counts = new Map();
+    for (const e of this.meta?.entries || []) {
+      for (const t of e.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   }
 
   /* ================= image URLs ================= */

@@ -92,6 +92,7 @@
   min-width: 0;
 }
 .search svg { width: 17px; height: 17px; flex: none; }
+.density-btn[aria-pressed="true"] { background: var(--surface); color: var(--ink); }
 .chip-row {
   display: flex;
   gap: 8px;
@@ -214,8 +215,16 @@
   grid-template-columns: repeat(3, 1fr);
   gap: 8px;
 }
-@media (min-width: 560px) { .grid { grid-template-columns: repeat(4, 1fr); gap: 10px; } }
-@media (min-width: 760px) { .grid { grid-template-columns: repeat(5, 1fr); } }
+.grid.compact { grid-template-columns: repeat(4, 1fr); gap: 5px; }
+@media (min-width: 560px) {
+  .grid { grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .grid.compact { grid-template-columns: repeat(6, 1fr); gap: 6px; }
+}
+@media (min-width: 760px) {
+  .grid { grid-template-columns: repeat(5, 1fr); }
+  .grid.compact { grid-template-columns: repeat(7, 1fr); }
+}
+.grid.compact .thumb-card { border-radius: var(--radius-sm); }
 
 .thumb-card {
   position: relative;

@@ -104,8 +104,24 @@ function filterBar(entries, onChange) {
       return dot;
     }));
 
+  // Cozy ⇄ compact grid density (persisted)
+  const densityBtn = el('button', {
+    class: 'icon-btn density-btn',
+    'aria-label': 'Toggle grid size',
+    'aria-pressed': store.settings.gridDensity === 'compact' ? 'true' : 'false',
+    title: 'Grid size',
+  }, icon('grid'));
+  densityBtn.addEventListener('click', () => {
+    const next = store.settings.gridDensity === 'compact' ? 'cozy' : 'compact';
+    store.saveSettings({ gridDensity: next });
+    densityBtn.setAttribute('aria-pressed', next === 'compact' ? 'true' : 'false');
+    onChange();
+  });
+
   return el('div', { class: 'filters' },
-    el('div', { class: 'search-row' }, el('div', { class: 'search' }, icon('search'), searchInput)),
+    el('div', { class: 'search-row' },
+      el('div', { class: 'search' }, icon('search'), searchInput),
+      densityBtn),
     chipRow);
 }
 
@@ -147,7 +163,7 @@ function renderList(listEl) {
     if (month !== currentMonth) {
       currentMonth = month;
       const count = filtered.filter((x) => x.date.startsWith(month)).length;
-      grid = el('div', { class: 'grid' });
+      grid = el('div', { class: `grid${store.settings.gridDensity === 'compact' ? ' compact' : ''}` });
       listEl.append(el('section', { class: 'month-section' },
         el('div', { class: 'month-head' },
           el('h2', { text: fmtMonthYear(month) }),

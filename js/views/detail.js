@@ -5,9 +5,10 @@
  */
 
 import { store } from '../store.js';
-import { el, toast, confirmDialog, openOverlay } from '../ui/dom.js';
+import { el, toast, actionToast, confirmDialog, sheet, openOverlay } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { fmtLong, relDay } from '../util/dates.js';
+import { buildMemoryCard } from '../shareCard.js';
 
 export function openDetail(id, contextIds) {
   const ids = contextIds?.length ? [...contextIds] : store.entries().map((e) => e.id);
@@ -63,13 +64,16 @@ export function openDetail(id, contextIds) {
 
     const tags = el('input', {
       class: 'lb-tags', type: 'text', placeholder: 'Tags, comma separated (work, date night…)',
-      'aria-label': 'Tags',
+      'aria-label': 'Tags', list: 'omTagList',
     });
     tags.value = (entry.tags || []).join(', ');
     tags.addEventListener('change', () =>
       store.updateOutfit(entry.id, {
         tags: tags.value.split(',').map((t) => t.trim()).filter(Boolean),
       }));
+    // Autocomplete from tags used elsewhere in the archive.
+    const tagList = el('datalist', { id: 'omTagList' },
+      store.allTags().slice(0, 20).map((t) => el('option', { value: t })));
 
     const meta = el('div', { class: 'lb-meta' },
       (entry.palette || []).map((p) =>
@@ -78,7 +82,18 @@ export function openDetail(id, contextIds) {
       entry.bytes ? el('span', { text: `· ${(entry.bytes / 1024).toFixed(0)} KB` }) : null);
 
     const shareBtn = el('button', { class: 'icon-btn', 'aria-label': 'Share' }, icon('share'));
-    shareBtn.addEventListener('click', () => shareEntry(entry));
+    shareBtn.addEventListener('click', () =>
+      sheet({
+        title: 'Share',
+        actions: [
+          { label: 'Share photo', icon: 'image', onPick: () => shareEntry(entry) },
+          {
+            label: 'Share as memory card', icon: 'sparkles',
+            sub: 'Polaroid-framed card with the date',
+            onPick: () => shareCard(entry),
+          },
+        ],
+      }));
 
     const dlBtn = el('button', { class: 'icon-btn', 'aria-label': 'Download photo' }, icon('download'));
     dlBtn.addEventListener('click', () => downloadEntry(entry));
@@ -91,9 +106,16 @@ export function openDetail(id, contextIds) {
         okLabel: 'Delete', danger: true,
       });
       if (!ok) return;
+      // Hold the blobs so Undo can put everything back.
+      const imgBlob = await store.imageBlob(entry);
+      const thumbBlob = await store.adapter.readFile(entry.thumbnail);
+      const snapshot = { ...entry, tags: [...(entry.tags || [])], colors: [...(entry.colors || [])] };
       await store.deleteOutfit(entry.id);
-      toast('Outfit deleted');
       ids.splice(idx, 1);
+      actionToast('Outfit deleted', 'Undo', async () => {
+        await store.restoreOutfit(snapshot, imgBlob, thumbBlob);
+        toast('Outfit restored ✓');
+      }, { ms: 8000 });
       if (!ids.length) return close();
       idx = Math.min(idx, ids.length - 1);
       render();
@@ -111,6 +133,7 @@ export function openDetail(id, contextIds) {
         el('div', { class: 'lb-actions' }, shareBtn, dlBtn, delBtn),
         notes,
         tags,
+        tagList,
         meta));
   }
 
@@ -144,6 +167,24 @@ async function shareEntry(entry) {
     }
   } catch (err) {
     if (err?.name !== 'AbortError') toast('Sharing is not available here');
+  }
+}
+
+async function shareCard(entry) {
+  try {
+    const blob = await buildMemoryCard(entry);
+    const file = new File([blob], `memory-card-${entry.date}.png`, { type: 'image/png' });
+    if (navigator.canShare?.({ files: [file] })) {
+      await navigator.share({ files: [file], title: `Outfit · ${fmtLong(entry.date)}` });
+    } else {
+      const a = el('a', { href: URL.createObjectURL(blob), download: file.name });
+      document.body.append(a);
+      a.click();
+      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+      toast('Memory card saved ✓');
+    }
+  } catch (err) {
+    if (err?.name !== 'AbortError') toast('Could not build the card');
   }
 }
 

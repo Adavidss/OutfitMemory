@@ -15,6 +15,7 @@ No account. No cloud. No server. Your photos never leave your device.
 - **OutfitMemory Wrapped** — an auto-advancing, story-style yearly recap.
 - **Memories** — "On this day last year…" resurfaces old looks.
 - **Themes** — Light, Dark, Mono, Retro Magazine, and Polaroid Scrapbook (plus Auto).
+- **Quality of life** — undo-able delete, ⤨ flashback (random outfit), bulk back-fill (multi-select from library, dated by photo file dates), tag autocomplete, cozy/compact grid toggle, "share as memory card" (polaroid-framed PNG composed on-device).
 - **PWA** — installable on your home screen, works fully offline.
 - **Backup / restore** — export `metadata.json` or a full ZIP archive; import merges cleanly.
 - **Automatic backups** (desktop Chrome/Edge) — pick a second folder and a preset (after every change / daily / weekly); OutfitMemory incrementally mirrors new photos + `metadata.json` into it. The backup folder is itself a complete archive — restoring is just "Choose Outfit Folder" and pointing at it.

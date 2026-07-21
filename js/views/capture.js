@@ -9,9 +9,9 @@
 
 import { store } from '../store.js';
 import { processPhoto } from '../imagePipeline.js';
-import { el, $, sheet, toast, openOverlay, haptic, confetti } from '../ui/dom.js';
+import { el, $, sheet, toast, progressToast, confirmDialog, openOverlay, haptic, confetti } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
-import { todayStr, relDay } from '../util/dates.js';
+import { todayStr, relDay, pad2 } from '../util/dates.js';
 
 const STREAK_MILESTONES = new Set([7, 14, 30, 50, 100, 200, 365]);
 
@@ -22,8 +22,9 @@ export function openCapture(opts = {}) {
   const arm = (input) => {
     input.value = ''; // allow re-picking the same file
     input.onchange = () => {
-      const file = input.files && input.files[0];
-      if (file) handleFile(file, opts);
+      const files = [...(input.files || [])];
+      if (files.length > 1) bulkImport(files);
+      else if (files[0]) handleFile(files[0], opts);
     };
     input.click();
   };
@@ -33,9 +34,49 @@ export function openCapture(opts = {}) {
       : "Add today's outfit",
     actions: [
       { label: 'Take Photo', icon: 'camera', onPick: () => arm(camera) },
-      { label: 'Choose from Library', icon: 'image', onPick: () => arm(library) },
+      {
+        label: 'Choose from Library', icon: 'image',
+        sub: 'Pick several to back-fill past days at once',
+        onPick: () => arm(library),
+      },
     ],
   });
+}
+
+/** Local "YYYY-MM-DD" from a file's modified time (≈ capture time for
+ *  camera-roll exports). Falls back to today for bogus timestamps. */
+function dateFromFile(file) {
+  const t = file.lastModified;
+  if (!t || t < Date.parse('2000-01-01')) return todayStr();
+  const d = new Date(t);
+  const s = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+  return s > todayStr() ? todayStr() : s;
+}
+
+/** Multi-select back-fill: one entry per photo, dated by file timestamp. */
+async function bulkImport(files) {
+  const ok = await confirmDialog({
+    title: `Add ${files.length} outfits?`,
+    body: 'Each photo becomes its own entry, dated from the photo file\'s date. You can adjust dates or delete any of them afterwards.',
+    okLabel: `Add ${files.length}`,
+  });
+  if (!ok) return;
+  const pt = progressToast(`Importing 1/${files.length}…`);
+  let added = 0;
+  let failed = 0;
+  for (let i = 0; i < files.length; i++) {
+    pt.update(`Importing ${i + 1}/${files.length}…`);
+    try {
+      const processed = await processPhoto(files[i]);
+      await store.addOutfit(processed, { date: dateFromFile(files[i]) });
+      added++;
+    } catch {
+      failed++; // unreadable file — keep going
+    }
+  }
+  pt.done(`Added ${added} outfit${added === 1 ? '' : 's'}${failed ? ` · ${failed} skipped` : ''} ✓`);
+  if (added >= 5) confetti();
+  haptic();
 }
 
 async function handleFile(file, opts) {

@@ -137,6 +137,7 @@ h1, h2, h3 { font-family: var(--font-display); line-height: 1.15; letter-spacing
   flex: none;
 }
 .brand-logo svg { width: 16px; height: 16px; }
+.topbar-right { display: flex; align-items: center; gap: 4px; }
 .streak-chip {
   display: inline-flex;
   align-items: center;
