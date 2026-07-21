@@ -96,9 +96,8 @@ function openPreview(processed, opts) {
       el('label', { class: 'field' }, icon('sparkles'), noteInput),
       el('div', { class: 'cap-buttons' }, retakeBtn, saveBtn)));
 
-  // Discard button floats over the photo via the top of the stage.
-  root.querySelector('.cap-stage').append(
-    el('div', { class: 'lb-top', style: { position: 'absolute', top: '0', left: '0', right: '0', zIndex: '3' } }, closeBtn));
+  // Discard button floats over the photo at the top of the stage.
+  root.querySelector('.cap-stage').append(el('div', { class: 'lb-top cap-top' }, closeBtn));
 
   const { close } = openOverlay(root, {
     variant: 'full',

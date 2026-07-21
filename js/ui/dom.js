@@ -7,6 +7,8 @@
  * the CSSOM (element.style.prop = …), which `el({style:{…}})` does.
  */
 
+import { icon } from './icons.js';
+
 export const $ = (sel, root = document) => root.querySelector(sel);
 export const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
@@ -75,8 +77,6 @@ export function openOverlay(content, { variant = 'sheet', onClose } = {}) {
 }
 
 /* ---------- Action sheet ---------- */
-
-import { icon } from './icons.js';
 
 /**
  * sheet({title, body, actions:[{label, sub, icon, danger, onPick}]})
