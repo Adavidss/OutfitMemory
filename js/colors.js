@@ -70,13 +70,14 @@ function classify(h, s, l) {
 }
 
 /**
- * extractColors(canvas) → { colors: ['navy', …], palette: [{name, hex, share}] }
+ * extractColors(canvas, {inset}) → { colors: ['navy', …], palette: [{name, hex, share}] }
  *
  * Samples a center-weighted crop (outfit photos are usually a person mid-
  * frame against a wall/mirror, so margins are mostly background) and
- * histograms the pixels into named buckets.
+ * histograms the pixels into named buckets. Pass `inset: false` when the
+ * canvas is already a tight crop (a wardrobe item) and every pixel counts.
  */
-export function extractColors(sourceCanvas) {
+export function extractColors(sourceCanvas, { inset = true } = {}) {
   try {
     const S = 48;
     const c = document.createElement('canvas');
@@ -85,7 +86,8 @@ export function extractColors(sourceCanvas) {
     const sw = sourceCanvas.width;
     const sh = sourceCanvas.height;
     // Central 64% width, 80% height — trims wall/ceiling/floor margins.
-    g.drawImage(sourceCanvas, sw * 0.18, sh * 0.1, sw * 0.64, sh * 0.8, 0, 0, S, S);
+    if (inset) g.drawImage(sourceCanvas, sw * 0.18, sh * 0.1, sw * 0.64, sh * 0.8, 0, 0, S, S);
+    else g.drawImage(sourceCanvas, 0, 0, sw, sh, 0, 0, S, S);
     const data = g.getImageData(0, 0, S, S).data;
 
     const buckets = new Map();

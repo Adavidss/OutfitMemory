@@ -20,6 +20,8 @@ const QUALITIES = [0.86, 0.8, 0.72, 0.64, 0.58];
 const MAX_BYTES = 500 * 1024;
 const THUMB_EDGE = 320;
 const THUMB_QUALITY = 0.8;
+const ITEM_EDGE = 360;      // wardrobe item crops
+const ITEM_QUALITY = 0.82;
 
 const toBlob = (canvas, mime, q) => new Promise((r) => canvas.toBlob(r, mime, q));
 
@@ -143,6 +145,27 @@ export async function processPhoto(file) {
   } finally {
     s.release();
   }
+}
+
+/**
+ * cropToItem(source, rect) — cut a wardrobe item out of an outfit photo.
+ * `source` is any drawable (decoded <img>/bitmap/canvas); `rect` is in
+ * the source's own pixel coordinates. Returns a small WebP crop plus the
+ * colors detected inside it, ready for store.addItem().
+ */
+export async function cropToItem(source, rect) {
+  const { mime, ext } = await getEncoder();
+  const scale = Math.min(1, ITEM_EDGE / Math.max(rect.w, rect.h));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(rect.w * scale));
+  canvas.height = Math.max(1, Math.round(rect.h * scale));
+  const g = canvas.getContext('2d');
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(source, rect.x, rect.y, rect.w, rect.h, 0, 0, canvas.width, canvas.height);
+  const blob = await toBlob(canvas, mime, ITEM_QUALITY);
+  // A crop is already tight around the garment — sample all of it.
+  const { colors, palette } = extractColors(canvas, { inset: false });
+  return { blob, ext, colors, palette, width: canvas.width, height: canvas.height };
 }
 
 /**

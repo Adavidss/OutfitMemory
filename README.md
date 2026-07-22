@@ -14,6 +14,7 @@ No account. No cloud. No server. Your photos never leave your device.
 - **Stats** — outfits recorded, current/longest streak, most photographed month, busiest weekday, most-worn colors, last-12-months chart.
 - **OutfitMemory Wrapped** — an auto-advancing, story-style yearly recap.
 - **Memories** — "On this day last year…" resurfaces old looks.
+- **Wardrobe (optional)** — tag clothing straight off your photos: drag a box around a piece and the app cuts the crop, reads its color and guesses the category. You get real **cost-per-wear** (wear counts come from the photo log, not self-reporting), "worth a rewear" nudges, what-pairs-with-what, and an **outfit builder** that shuffles your own clothes into something to wear. Never required — the journal works untouched if you ignore it.
 - **Themes** — Light, Dark, Mono, Retro Magazine, and Polaroid Scrapbook (plus Auto).
 - **Quality of life** — undo-able delete, ⤨ flashback (random outfit), bulk back-fill (multi-select from library, dated by photo file dates), tag autocomplete, cozy/compact grid toggle, "share as memory card" (polaroid-framed PNG composed on-device).
 - **PWA** — installable on your home screen, works fully offline.
@@ -58,6 +59,7 @@ OutfitMemory is *local-first by construction*, not by promise:
 OutfitMemory/
 ├── Photos/2026/07/outfit_2026-07-21.webp
 ├── Thumbnails/2026/07/outfit_2026-07-21_thumb.webp
+├── Items/itm_ab12cd.webp          (only if you tag clothing)
 └── metadata.json
 ```
 
@@ -80,7 +82,20 @@ Readable in 20 years with no app at all. `metadata.json` is derived data in spir
     "tags": [],
     "colors": ["navy", "white"],
     "palette": [{ "name": "navy", "hex": "#26324f", "share": 0.31 }],
-    "weather": null
+    "weather": null,
+    "items": ["itm_ab12cd"]
+  }],
+  "items": [{
+    "id": "itm_ab12cd",
+    "name": "Navy crew sweater",
+    "category": "top",
+    "color": "navy",
+    "hex": "#26324f",
+    "brand": "",
+    "price": 89,
+    "currency": "USD",
+    "link": "",
+    "thumb": "Items/itm_ab12cd.webp"
   }]
 }
 ```
@@ -108,8 +123,10 @@ js/
   store.js            state, metadata CRUD, export/import, migration
   imagePipeline.js    decode → resize → compress → thumbnail
   colors.js           dominant-color analyzer (first "AI" plugin point)
+  wardrobe.js         item analytics + the outfit recombination engine
   storage/            folderStorage (FS Access) · browserStorage (IndexedDB)
   views/              gallery · calendar · stats · wrapped · detail · capture · settings · onboarding
+                      wardrobeView · itemTagger · outfitBuilder
   ui/                 dom helpers · svg icons
   util/               dates/streaks · idb wrapper · zip writer+reader
 sw.js                 offline cache (bump CACHE on deploy)
@@ -117,12 +134,58 @@ manifest.webmanifest  PWA manifest (+ "Add Outfit" shortcut)
 scripts/generate_icons.py  regenerates PNG icons from the SVG design
 ```
 
+## The wardrobe layer
+
+Tagging is opt-in and additive. Open any outfit → **Tag clothing** → drag a box
+around one piece. The crop is saved to `Items/`, the color comes from the pixels,
+and the category is guessed from where the box sits on the body. Name it (or accept
+the suggestion) and you're done; brand, price and a product link are optional.
+
+Because OutfitMemory already knows *when you wore what*, the numbers it derives are
+real rather than self-reported:
+
+| Derived | From |
+|---|---|
+| Times worn, last worn | photos the item is tagged in |
+| **Cost per wear** | `price ÷ wears` — the one number a shopping app can't compute for you |
+| "Worth a rewear" | items unworn for 60+ days, or never worn |
+| "You usually wear it with" | co-occurrence across your outfits |
+| Outfit suggestions | least-recently-worn pieces, neutral-anchored color harmony, and never a combo you wore in the last 3 weeks |
+
+Items live in `metadata.json` under `items[]`, and outfits reference them by id in
+`entry.items[]` — so schema 1 archives keep loading unchanged, and an archive with
+no tagged clothes has no `items` at all.
+
+## Purchase links & reverse image search
+
+**Manual product links: supported.** Each item has a "where to buy" field; the app
+renders it as a normal outbound link (http/https only — `javascript:` and `data:`
+URLs are rejected before they ever reach an `href`).
+
+**Automatic "find this garment online": deliberately not built.** It cannot be done
+without breaking the three promises this app is built on. Reverse-image product
+search needs (a) a paid vision/shopping API — Google Lens, SerpAPI, or a retailer
+affiliate feed, (b) a backend to hold that API key, since a key shipped in static
+JS is a public key, and (c) **uploading your outfit photo to a third party**. The
+`Content-Security-Policy` in `index.html` blocks every off-origin request, so the
+app is currently incapable of doing this even by accident. Anyone forking this to
+add it would need to relax the CSP, run a key-holding proxy, and — most importantly
+— tell users their photos are leaving the device.
+
+**On-device recognition is the honest middle path,** and the code is shaped for it:
+a quantized CLIP/MobileViT model via `transformers.js` could label a crop
+("navy crew-neck sweater") with no network at all, filling `category`/`color`
+automatically. It would need the model self-hosted in the repo (~30–50 MB) and
+`wasm-unsafe-eval` added to the CSP. Note what it still can't do: identify a
+*brand or product*, so it makes tagging faster but never produces a purchase link.
+
 ## Future AI (designed-for, not required)
 
 The metadata is deliberately extensible; analyzers run on-device and write fields beside the photo:
 
 - **Color extraction** — ✅ already implemented (`colors.js`, ~1 ms/photo, no ML).
 - **Similar outfit search** — add per-photo embeddings (e.g. MobileCLIP via WebGPU/ONNX-runtime-web) stored as an `embedding` field; cosine-match for "show outfits like this".
+- **Auto-tagging** — the same embedding pass over item crops could pre-fill `category` and `name` (see "Purchase links & reverse image search" above for what's realistic and what isn't).
 - **Style evolution / Wrapped+** — richer yearly summaries from colors + embeddings.
 - **Clothing detection** — a small on-device segmentation model writing `items: ["shirt", "jeans", …]`.
 

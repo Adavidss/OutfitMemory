@@ -46,7 +46,10 @@ function applyFilter(entries) {
     if (filter.month && !e.date.startsWith(filter.month)) return false;
     if (filter.color && !(e.colors || []).includes(filter.color)) return false;
     if (q) {
-      const hay = `${e.date} ${e.notes || ''} ${(e.tags || []).join(' ')}`.toLowerCase();
+      // Searching also reaches the clothes tagged in the photo, so
+      // "linen shirt" finds every outfit it appears in.
+      const itemText = store.itemsFor(e).map((i) => `${i.name} ${i.brand || ''}`).join(' ');
+      const hay = `${e.date} ${e.notes || ''} ${(e.tags || []).join(' ')} ${itemText}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -55,8 +58,10 @@ function applyFilter(entries) {
 
 function filterBar(entries, onChange) {
   const searchInput = el('input', {
-    type: 'search', placeholder: 'Search notes, tags, dates…', value: filter.q,
-    'aria-label': 'Search outfits',
+    type: 'search', value: filter.q, 'aria-label': 'Search outfits',
+    placeholder: store.items().length
+      ? 'Search notes, clothes, dates…'
+      : 'Search notes, tags, dates…',
   });
   let deb;
   searchInput.addEventListener('input', () => {

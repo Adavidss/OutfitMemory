@@ -14,6 +14,7 @@ import { renderGallery } from './views/gallery.js';
 import { renderCalendar } from './views/calendar.js';
 import { renderStats } from './views/statsView.js';
 import { renderSettings } from './views/settingsView.js';
+import { renderWardrobe } from './views/wardrobeView.js';
 import { renderOnboarding, renderLocked } from './views/onboarding.js';
 import { openCapture } from './views/capture.js';
 import { openDetail } from './views/detail.js';
@@ -23,9 +24,13 @@ import { toast } from './ui/dom.js';
 const VIEWS = {
   gallery: { render: renderGallery, icon: 'grid', label: 'Photos' },
   calendar: { render: renderCalendar, icon: 'calendar', label: 'Calendar' },
+  wardrobe: { render: renderWardrobe, icon: 'hanger', label: 'Wardrobe' },
   stats: { render: renderStats, icon: 'chart', label: 'Stats' },
   settings: { render: renderSettings, icon: 'settings', label: 'Settings' },
 };
+
+// Settings lives in the top bar, so the tab bar keeps four roomy targets.
+const TABS = ['gallery', 'calendar', 'wardrobe', 'stats'];
 
 const THEME_BG = {
   light: '#ffffff', dark: '#0b0b0f', mono: '#ffffff',
@@ -61,6 +66,7 @@ function renderView() {
   const route = currentRoute();
   store.saveSettings({ lastView: route });
   for (const tab of $$tabs()) tab.classList.toggle('active', tab.dataset.route === route);
+  $('#topbar')?.classList.toggle('on-settings', route === 'settings');
   VIEWS[route].render($('#view'));
 }
 
@@ -84,11 +90,15 @@ function buildChrome() {
   const streakChip = el('button', { class: 'streak-chip', id: 'streakChip', hidden: true, 'aria-label': 'Current streak — open stats' });
   streakChip.addEventListener('click', () => { location.hash = '#/stats'; });
 
+  const settingsBtn = el('button', { class: 'icon-btn', 'aria-label': 'Settings', title: 'Settings' },
+    icon('settings'));
+  settingsBtn.addEventListener('click', () => { location.hash = '#/settings'; });
+
   topbar.replaceChildren(el('div', { class: 'topbar-inner' },
     el('div', { class: 'brand' },
       el('span', { class: 'brand-logo' }, icon('cameraHeart')),
       'OutfitMemory'),
-    el('div', { class: 'topbar-right' }, shuffleBtn, streakChip)));
+    el('div', { class: 'topbar-right' }, streakChip, shuffleBtn, settingsBtn)));
 
   const mkTab = (route) => {
     const v = VIEWS[route];
@@ -108,7 +118,7 @@ function buildChrome() {
   fab.addEventListener('click', () => openCapture());
 
   $('#tabbar').replaceChildren(el('div', { class: 'tabbar-inner' },
-    mkTab('gallery'), mkTab('calendar'), fab, mkTab('stats'), mkTab('settings')));
+    mkTab(TABS[0]), mkTab(TABS[1]), fab, mkTab(TABS[2]), mkTab(TABS[3])));
 
   updateStreakChip();
 }

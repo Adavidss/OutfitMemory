@@ -9,6 +9,8 @@ import { el, toast, actionToast, confirmDialog, sheet, openOverlay } from '../ui
 import { icon } from '../ui/icons.js';
 import { fmtLong, relDay } from '../util/dates.js';
 import { buildMemoryCard } from '../shareCard.js';
+import { openItemTagger } from './itemTagger.js';
+import { openItemDetail } from './wardrobeView.js';
 
 export function openDetail(id, contextIds) {
   const ids = contextIds?.length ? [...contextIds] : store.entries().map((e) => e.id);
@@ -81,6 +83,22 @@ export function openDetail(id, contextIds) {
       el('span', { text: (entry.colors || []).join(' · ') }),
       entry.bytes ? el('span', { text: `· ${(entry.bytes / 1024).toFixed(0)} KB` }) : null);
 
+    /* Wardrobe items worn in this outfit — optional, empty unless tagged. */
+    const worn = store.itemsFor(entry);
+    const tagBtn = el('button', { class: 'btn btn-sm lb-tag-btn' },
+      icon('hanger'), worn.length ? 'Edit clothing' : 'Tag clothing');
+    tagBtn.addEventListener('click', () => openItemTagger(entry.id));
+
+    const itemRow = el('div', { class: 'lb-items' },
+      worn.map((item) => {
+        const thumb = el('img', { alt: '' });
+        store.itemThumbURL(item).then((u) => { if (u) thumb.src = u; });
+        const chip = el('button', { class: 'lb-item-chip' }, thumb, el('b', { text: item.name }));
+        chip.addEventListener('click', () => openItemDetail(item.id));
+        return chip;
+      }),
+      tagBtn);
+
     const shareBtn = el('button', { class: 'icon-btn', 'aria-label': 'Share' }, icon('share'));
     shareBtn.addEventListener('click', () =>
       sheet({
@@ -131,6 +149,7 @@ export function openDetail(id, contextIds) {
       stage,
       el('div', { class: 'lb-panel' },
         el('div', { class: 'lb-actions' }, shareBtn, dlBtn, delBtn),
+        itemRow,
         notes,
         tags,
         tagList,

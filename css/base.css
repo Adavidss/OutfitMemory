@@ -108,6 +108,8 @@ h1, h2, h3 { font-family: var(--font-display); line-height: 1.15; letter-spacing
   border-bottom: 1px solid var(--line);
   padding-top: var(--safe-t);
 }
+.topbar-right { display: flex; align-items: center; gap: 2px; }
+.topbar.on-settings .icon-btn[aria-label="Settings"] { color: var(--accent); }
 .topbar-inner {
   max-width: 780px;
   margin: 0 auto;

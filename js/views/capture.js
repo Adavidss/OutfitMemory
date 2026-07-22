@@ -15,7 +15,11 @@ import { todayStr, relDay, pad2 } from '../util/dates.js';
 
 const STREAK_MILESTONES = new Set([7, 14, 30, 50, 100, 200, 365]);
 
-/** Entry point. opts: { date? } to back-fill a specific day. */
+/**
+ * Entry point.
+ * opts.date  — back-fill a specific day
+ * opts.items — wardrobe item ids to attach on save (from the outfit builder)
+ */
 export function openCapture(opts = {}) {
   const camera = $('#fileCamera');
   const library = $('#fileLibrary');
@@ -128,9 +132,18 @@ function openPreview(processed, opts) {
 
   const closeBtn = el('button', { class: 'icon-btn', 'aria-label': 'Discard' }, icon('x'));
 
+  // Came from the outfit builder — show what will be tagged on save.
+  const preTagged = (opts.items || [])
+    .map((id) => store.itemById(id)).filter(Boolean);
+  const tagNote = preTagged.length
+    ? el('div', { class: 'cap-tagged' }, icon('hanger'),
+        el('span', { text: preTagged.map((i) => i.name).join(' · ') }))
+    : null;
+
   const root = el('div', { class: 'capture' },
     el('div', { class: 'cap-stage' }, img),
     el('div', { class: 'cap-panel' },
+      tagNote,
       el('div', { class: 'cap-row' },
         el('label', { class: 'field' }, icon('calendar'), dateInput),
         favBtn),
@@ -156,7 +169,9 @@ function openPreview(processed, opts) {
     saveBtn.textContent = 'Saving…';
     try {
       const date = dateInput.value || todayStr();
-      await store.addOutfit(processed, { date, notes: noteInput.value.trim(), favorite });
+      await store.addOutfit(processed, {
+        date, notes: noteInput.value.trim(), favorite, items: opts.items || [],
+      });
       close();
       haptic();
       celebrate();

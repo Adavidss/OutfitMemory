@@ -120,19 +120,18 @@ export async function backupNow({ interactive = false, onProgress } = {}) {
   if (!handle) return { ok: false, reason: 'nofolder' };
   if ((await permission(handle, interactive)) !== 'granted') return { ok: false, reason: 'locked' };
 
-  const entries = store.entries();
+  // allFilePaths() covers photos, thumbnails and wardrobe item crops.
+  const paths = store.allFilePaths();
   let copied = 0;
   let i = 0;
-  for (const e of entries) {
+  for (const path of paths) {
     i++;
-    onProgress?.(i, entries.length);
-    for (const path of [e.image, e.thumbnail]) {
-      if (!path || (await existsIn(handle, path))) continue;
-      const blob = await store.adapter.readFile(path);
-      if (blob) {
-        await writeTo(handle, path, blob);
-        copied++;
-      }
+    onProgress?.(i, paths.length);
+    if (await existsIn(handle, path)) continue;
+    const blob = await store.adapter.readFile(path);
+    if (blob) {
+      await writeTo(handle, path, blob);
+      copied++;
     }
   }
   await writeTo(handle, 'metadata.json', store.metadataBlob());

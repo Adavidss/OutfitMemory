@@ -7,17 +7,24 @@
  *
  * Metadata schema (metadata.json — see README for the full contract):
  * {
- *   app: "OutfitMemory", schema: 1, createdAt, updatedAt,
+ *   app: "OutfitMemory", schema: 2, createdAt, updatedAt,
  *   entries: [{
  *     id: "2026-07-21-001", date: "2026-07-21", time: "08:12",
  *     image: "Photos/2026/07/outfit_2026-07-21.webp",
  *     thumbnail: "Thumbnails/2026/07/outfit_2026-07-21_thumb.webp",
  *     favorite, notes, tags[], colors[], palette[], weather,
+ *     items: ["itm_ab12cd"],          // schema 2 — optional wardrobe links
  *     width, height, bytes, addedAt
+ *   }],
+ *   items: [{                          // schema 2 — the optional wardrobe
+ *     id: "itm_ab12cd", name: "Navy crew sweater", category: "top",
+ *     color: "navy", hex: "#26324f", brand, price, currency, link, notes,
+ *     thumb: "Items/itm_ab12cd.webp", createdAt
  *   }]
  * }
  * Unknown top-level/entry fields are preserved on load+save, so future
- * (AI) features can extend entries without a migration.
+ * (AI) features can extend entries without a migration. Schema 1 archives
+ * load unchanged — `items` is simply absent until the user tags something.
  */
 
 import { FolderStorage } from './storage/folderStorage.js';
@@ -40,9 +47,17 @@ const DEFAULT_SETTINGS = {
   backup: { preset: 'off', lastRun: '', folderName: '' }, // see js/backup.js
 };
 
+const SCHEMA = 2;
+
 function freshMeta() {
   const now = new Date().toISOString();
-  return { app: 'OutfitMemory', schema: 1, createdAt: now, updatedAt: now, entries: [] };
+  return { app: 'OutfitMemory', schema: SCHEMA, createdAt: now, updatedAt: now, entries: [], items: [] };
+}
+
+/** Short, collision-proof-enough id for a wardrobe item. */
+function itemId() {
+  const rnd = crypto.getRandomValues(new Uint32Array(2));
+  return `itm_${rnd[0].toString(36)}${rnd[1].toString(36)}`.slice(0, 14);
 }
 
 class Store extends EventTarget {
@@ -112,8 +127,15 @@ class Store extends EventTarget {
 
   async #load() {
     this.meta = (await this.adapter.loadMetadata()) || this.#cachedMeta() || freshMeta();
-    if (!Array.isArray(this.meta.entries)) this.meta.entries = [];
+    this.#normalize();
     this.#cacheMeta();
+  }
+
+  /** Bring any loaded archive up to the current schema (purely additive). */
+  #normalize() {
+    if (!Array.isArray(this.meta.entries)) this.meta.entries = [];
+    if (!Array.isArray(this.meta.items)) this.meta.items = [];
+    this.meta.schema = Math.max(SCHEMA, Number(this.meta.schema) || 0);
   }
 
   // localStorage mirror of metadata — instant boot + recovery if the
@@ -133,7 +155,7 @@ class Store extends EventTarget {
     else BrowserStorage.persist(); // fire-and-forget; result shown in settings
     const existing = await adapter.loadMetadata();
     this.meta = existing || freshMeta();
-    if (!Array.isArray(this.meta.entries)) this.meta.entries = [];
+    this.#normalize();
     if (!existing) await adapter.saveMetadata(this.meta);
     this.saveSettings({ setupDone: true, storageKind: adapter.kind });
     this.#cacheMeta();
@@ -197,7 +219,7 @@ class Store extends EventTarget {
     };
   }
 
-  async addOutfit(processed, { date = todayStr(), notes = '', favorite = false } = {}) {
+  async addOutfit(processed, { date = todayStr(), notes = '', favorite = false, items = [] } = {}) {
     const seq = this.#nextSeq(date);
     const id = `${date}-${String(seq).padStart(3, '0')}`;
     const { image, thumbnail } = this.#pathsFor(date, seq, processed.ext);
@@ -214,6 +236,7 @@ class Store extends EventTarget {
       favorite,
       notes,
       tags: [],
+      items: items.filter((id) => this.itemById(id)),
       colors: processed.colors || [],
       palette: processed.palette || [],
       weather: null,
@@ -270,6 +293,118 @@ class Store extends EventTarget {
     this.emit();
   }
 
+  /* ================= wardrobe items (optional layer) ================= */
+
+  /** Every wardrobe item, newest first. Empty until the user tags one. */
+  items() {
+    return [...(this.meta?.items || [])].sort((a, b) =>
+      (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }
+
+  itemById(id) {
+    return this.meta?.items?.find((i) => i.id === id) || null;
+  }
+
+  /** Items linked to an outfit, in wardrobe order. */
+  itemsFor(entry) {
+    return (entry?.items || []).map((id) => this.itemById(id)).filter(Boolean);
+  }
+
+  /** Outfits featuring an item, newest first. */
+  entriesWithItem(id) {
+    return this.entries().filter((e) => (e.items || []).includes(id));
+  }
+
+  /**
+   * Create an item from a crop taken out of an outfit photo.
+   * `crop` is { blob, ext } from imagePipeline.cropToItem().
+   */
+  async addItem(fields, crop, linkToEntryId = null) {
+    const id = itemId();
+    let thumb = '';
+    if (crop?.blob) {
+      thumb = `Items/${id}.${crop.ext || 'webp'}`;
+      await this.adapter.writeFile(thumb, crop.blob);
+    }
+    const item = {
+      id,
+      name: (fields.name || 'Item').trim(),
+      category: fields.category || 'top',
+      color: fields.color || '',
+      hex: fields.hex || '',
+      brand: (fields.brand || '').trim(),
+      price: Number.isFinite(fields.price) ? fields.price : null,
+      currency: fields.currency || this.settings.currency || 'USD',
+      link: fields.link || '',
+      notes: (fields.notes || '').trim(),
+      thumb,
+      createdAt: new Date().toISOString(),
+    };
+    this.meta.items.push(item);
+    if (linkToEntryId) {
+      const e = this.entryById(linkToEntryId);
+      if (e) {
+        if (!Array.isArray(e.items)) e.items = [];
+        if (!e.items.includes(id)) e.items.push(id);
+      }
+    }
+    await this.#saveMeta();
+    this.emit();
+    return item;
+  }
+
+  async updateItem(id, patch) {
+    const it = this.itemById(id);
+    if (!it) return null;
+    Object.assign(it, patch);
+    await this.#saveMeta();
+    this.emit();
+    return it;
+  }
+
+  /** Delete an item and unlink it from every outfit (photos untouched). */
+  async deleteItem(id) {
+    const it = this.itemById(id);
+    if (!it) return;
+    if (it.thumb) {
+      await this.adapter.deleteFile(it.thumb);
+      const u = this.#urls.get(it.thumb);
+      if (u) { URL.revokeObjectURL(u); this.#urls.delete(it.thumb); }
+    }
+    this.meta.items = this.meta.items.filter((x) => x.id !== id);
+    for (const e of this.meta.entries) {
+      if (e.items?.includes(id)) e.items = e.items.filter((x) => x !== id);
+    }
+    await this.#saveMeta();
+    this.emit();
+  }
+
+  /** Link/unlink an existing item to an outfit. Returns the new link state. */
+  async toggleItemLink(entryId, id) {
+    const e = this.entryById(entryId);
+    if (!e || !this.itemById(id)) return false;
+    if (!Array.isArray(e.items)) e.items = [];
+    const has = e.items.includes(id);
+    e.items = has ? e.items.filter((x) => x !== id) : [...e.items, id];
+    await this.#saveMeta();
+    this.emit();
+    return !has;
+  }
+
+  /** Set an outfit's full item list at once (used by the outfit builder). */
+  async setEntryItems(entryId, ids) {
+    const e = this.entryById(entryId);
+    if (!e) return null;
+    e.items = [...new Set(ids)].filter((id) => this.itemById(id));
+    await this.#saveMeta();
+    this.emit();
+    return e;
+  }
+
+  itemThumbURL(item) {
+    return item?.thumb ? this.#url(item.thumb) : Promise.resolve(null);
+  }
+
   /** All distinct tags, most-used first (for autocomplete). */
   allTags() {
     const counts = new Map();
@@ -314,18 +449,28 @@ class Store extends EventTarget {
     return new Blob([JSON.stringify(this.meta, null, 2)], { type: 'application/json' });
   }
 
-  /** Full archive → ZIP (metadata.json + Photos/ + Thumbnails/). */
+  /**
+   * Every archive-relative file path the app owns, oldest entry first.
+   * Single source of truth for export, backup mirroring and migration —
+   * so a new file kind (item crops) is never silently left behind.
+   */
+  allFilePaths() {
+    const paths = [];
+    for (const e of this.entries().reverse()) paths.push(e.image, e.thumbnail);
+    for (const it of this.meta?.items || []) if (it.thumb) paths.push(it.thumb);
+    return paths.filter(Boolean);
+  }
+
+  /** Full archive → ZIP (metadata.json + Photos/ + Thumbnails/ + Items/). */
   async exportArchive(onProgress) {
     const files = [{ path: 'metadata.json', blob: this.metadataBlob() }];
-    const list = this.entries().reverse(); // oldest first, tidy archive order
+    const paths = this.allFilePaths();
     let i = 0;
-    for (const e of list) {
+    for (const p of paths) {
       i++;
-      onProgress?.('read', i, list.length);
-      const img = await this.adapter.readFile(e.image);
-      if (img) files.push({ path: e.image, blob: img });
-      const th = await this.adapter.readFile(e.thumbnail);
-      if (th) files.push({ path: e.thumbnail, blob: th });
+      onProgress?.('read', i, paths.length);
+      const blob = await this.adapter.readFile(p);
+      if (blob) files.push({ path: p, blob });
     }
     return zipFiles(files, (n, total) => onProgress?.('zip', n, total));
   }
@@ -352,7 +497,7 @@ class Store extends EventTarget {
         i++;
         onProgress?.(i, entries.length);
         const rel = prefix && en.path.startsWith(prefix) ? en.path.slice(prefix.length) : en.path;
-        if (!/^(Photos|Thumbnails)\//.test(rel)) continue;
+        if (!/^(Photos|Thumbnails|Items)\//.test(rel)) continue;
         if (await this.adapter.readFile(rel)) continue; // never clobber existing
         await this.adapter.writeFile(rel, await en.getBlob());
         filesWritten++;
@@ -360,6 +505,7 @@ class Store extends EventTarget {
       if (metaEntry) {
         const incoming = JSON.parse(await (await metaEntry.getBlob()).text());
         ({ added, skipped } = this.#mergeEntries(incoming?.entries));
+        this.#mergeItems(incoming?.items);
       }
     }
 
@@ -381,6 +527,19 @@ class Store extends EventTarget {
       }
     }
     return { added, skipped };
+  }
+
+  /** Merge wardrobe items by id (existing items always win). */
+  #mergeItems(list) {
+    if (!Array.isArray(list)) return 0;
+    let added = 0;
+    for (const it of list) {
+      if (it?.id && !this.itemById(it.id)) {
+        this.meta.items.push(it);
+        added++;
+      }
+    }
+    return added;
   }
 
   /* ================= folder maintenance ================= */
@@ -435,15 +594,13 @@ class Store extends EventTarget {
 
   /** Copy the whole archive to another adapter and switch over. */
   async migrateTo(newAdapter, onProgress) {
-    const list = this.entries().reverse();
+    const paths = this.allFilePaths();
     let i = 0;
-    for (const e of list) {
+    for (const p of paths) {
       i++;
-      onProgress?.(i, list.length);
-      const img = await this.adapter.readFile(e.image);
-      if (img) await newAdapter.writeFile(e.image, img);
-      const th = await this.adapter.readFile(e.thumbnail);
-      if (th) await newAdapter.writeFile(e.thumbnail, th);
+      onProgress?.(i, paths.length);
+      const blob = await this.adapter.readFile(p);
+      if (blob) await newAdapter.writeFile(p, blob);
     }
     await newAdapter.saveMetadata(this.meta);
     const old = this.adapter;
