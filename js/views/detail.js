@@ -11,6 +11,7 @@ import { fmtLong, relDay } from '../util/dates.js';
 import { buildMemoryCard } from '../shareCard.js';
 import { openItemTagger } from './itemTagger.js';
 import { openItemDetail } from './wardrobeView.js';
+import { openSimilarItems } from './similarItems.js';
 
 export function openDetail(id, contextIds) {
   const ids = contextIds?.length ? [...contextIds] : store.entries().map((e) => e.id);
@@ -89,6 +90,10 @@ export function openDetail(id, contextIds) {
       icon('hanger'), worn.length ? 'Edit clothing' : 'Tag clothing');
     tagBtn.addEventListener('click', () => openItemTagger(entry.id));
 
+    const findBtn = el('button', { class: 'btn btn-sm lb-find-btn' },
+      icon('search'), entry.shopping ? 'Shopping matches' : 'Find similar items');
+    findBtn.addEventListener('click', () => openSimilarItems(entry.id));
+
     const itemRow = el('div', { class: 'lb-items' },
       worn.map((item) => {
         const thumb = el('img', { alt: '' });
@@ -97,7 +102,8 @@ export function openDetail(id, contextIds) {
         chip.addEventListener('click', () => openItemDetail(item.id));
         return chip;
       }),
-      tagBtn);
+      tagBtn,
+      findBtn);
 
     const shareBtn = el('button', { class: 'icon-btn', 'aria-label': 'Share' }, icon('share'));
     shareBtn.addEventListener('click', () =>

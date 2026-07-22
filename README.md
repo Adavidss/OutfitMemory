@@ -14,7 +14,8 @@ No account. No cloud. No server. Your photos never leave your device.
 - **Stats** — outfits recorded, current/longest streak, most photographed month, busiest weekday, most-worn colors, last-12-months chart.
 - **OutfitMemory Wrapped** — an auto-advancing, story-style yearly recap.
 - **Memories** — "On this day last year…" resurfaces old looks.
-- **Wardrobe (optional)** — tag clothing straight off your photos: drag a box around a piece and the app cuts the crop, reads its color and guesses the category. You get real **cost-per-wear** (wear counts come from the photo log, not self-reporting), "worth a rewear" nudges, what-pairs-with-what, and an **outfit builder** that shuffles your own clothes into something to wear. Never required — the journal works untouched if you ignore it.
+- **Find similar items** — an on-device FashionCLIP model describes each garment ("black oversized cotton hoodie") and turns it into one-tap searches at six retailers. Your photo never leaves the device. See [the section below](#find-similar-items--on-device-clothing-recognition).
+- **Wardrobe (optional)** — tag clothing straight off your photos: drag roughly over a piece and *smart select* snaps to the garment, ignoring your skin and the wall behind you, then reads its color and guesses the category. You get real **cost-per-wear** (wear counts come from the photo log, not self-reporting), "worth a rewear" nudges, what-pairs-with-what, and an **outfit builder** that shuffles your own clothes into something to wear. Never required — the journal works untouched if you ignore it.
 - **Themes** — Light, Dark, Mono, Retro Magazine, and Polaroid Scrapbook (plus Auto).
 - **Quality of life** — undo-able delete, ⤨ flashback (random outfit), bulk back-fill (multi-select from library, dated by photo file dates), tag autocomplete, cozy/compact grid toggle, "share as memory card" (polaroid-framed PNG composed on-device).
 - **PWA** — installable on your home screen, works fully offline.
@@ -51,7 +52,7 @@ OutfitMemory is *local-first by construction*, not by promise:
 | `metadata.json` (dates, notes, tags, colors) | Same folder / browser storage, mirrored to `localStorage` for crash recovery | Never |
 | Settings (theme, last view) | `localStorage` | Never |
 
-- **No network calls at all.** The page ships a `Content-Security-Policy` that only allows same-origin requests — the app is *incapable* of phoning home, by policy the browser enforces.
+- **Nothing is ever uploaded.** The `Content-Security-Policy` permits exactly two off-origin hosts, both *download-only* and both used solely to fetch the on-device clothing model (`cdn.jsdelivr.net`, `huggingface.co`). There is no other `connect-src` host and no `form-action` target, so photos and metadata have nowhere to be posted — enforced by the browser, not by promise. Skip Find similar items and the app makes no network requests at all.
 - **EXIF stripped.** Photos are re-encoded through a canvas on save, which removes all metadata (GPS location, device model, etc.) from stored files.
 - **You own the archive.** It's a plain folder:
 
@@ -123,10 +124,18 @@ js/
   store.js            state, metadata CRUD, export/import, migration
   imagePipeline.js    decode → resize → compress → thumbnail
   colors.js           dominant-color analyzer (first "AI" plugin point)
+  segment.js          garment segmentation (skin/background exclusion)
   wardrobe.js         item analytics + the outfit recombination engine
+  models/             fashionModel — model registry, worker lifecycle, crops
+  workers/            inferenceWorker — FashionCLIP off the main thread
+  search/             queryBuilder (attributes → phrase) · shoppingSearch (retailers)
+  cache/              modelCache — what's downloaded, and deleting it
+  utils/              clothingParser — the fashion vocabulary & attribute axes
   storage/            folderStorage (FS Access) · browserStorage (IndexedDB)
   views/              gallery · calendar · stats · wrapped · detail · capture · settings · onboarding
-                      wardrobeView · itemTagger · outfitBuilder
+                      wardrobeView · itemTagger · outfitBuilder · similarItems
+models/               precomputed vocabulary embeddings (built, not hand-edited)
+scripts/              generate_icons.py · build_vocab_embeddings.py
   ui/                 dom helpers · svg icons
   util/               dates/streaks · idb wrapper · zip writer+reader
 sw.js                 offline cache (bump CACHE on deploy)
@@ -156,28 +165,89 @@ Items live in `metadata.json` under `items[]`, and outfits reference them by id 
 `entry.items[]` — so schema 1 archives keep loading unchanged, and an archive with
 no tagged clothes has no `items` at all.
 
-## Purchase links & reverse image search
+## Find Similar Items — on-device clothing recognition
 
-**Manual product links: supported.** Each item has a "where to buy" field; the app
-renders it as a normal outbound link (http/https only — `javascript:` and `data:`
-URLs are rejected before they ever reach an `href`).
+Open any outfit → **Find similar items**. A FashionCLIP model runs *in your
+browser* to describe each garment, then builds shopping phrases you can run at
+Google Shopping, Amazon, eBay, Grailed, Depop or Poshmark.
 
-**Automatic "find this garment online": deliberately not built.** It cannot be done
-without breaking the three promises this app is built on. Reverse-image product
-search needs (a) a paid vision/shopping API — Google Lens, SerpAPI, or a retailer
-affiliate feed, (b) a backend to hold that API key, since a key shipped in static
-JS is a public key, and (c) **uploading your outfit photo to a third party**. The
-`Content-Security-Policy` in `index.html` blocks every off-origin request, so the
-app is currently incapable of doing this even by accident. Anyone forking this to
-add it would need to relax the CSP, run a key-holding proxy, and — most importantly
-— tell users their photos are leaving the device.
+No backend, no API keys, no accounts, no uploads. Free forever.
 
-**On-device recognition is the honest middle path,** and the code is shaped for it:
-a quantized CLIP/MobileViT model via `transformers.js` could label a crop
-("navy crew-neck sweater") with no network at all, filling `category`/`color`
-automatically. It would need the model self-hosted in the repo (~30–50 MB) and
-`wasm-unsafe-eval` added to the CSP. Note what it still can't do: identify a
-*brand or product*, so it makes tagging faster but never produces a purchase link.
+### How it works
+
+**It is not reverse image search.** Reverse image search would require sending
+your photo to a third party. Instead the model *describes* the garment locally,
+and those words become an ordinary search query — which you can read and edit
+before anything is clicked.
+
+The model is [Marqo FashionCLIP](https://huggingface.co/Marqo/marqo-fashionCLIP),
+run through [Transformers.js](https://github.com/huggingface/transformers.js) /
+ONNX Runtime Web. CLIP is *zero-shot*: it scores how well an image matches an
+arbitrary sentence. "Recognition" is therefore scoring the crop against a curated
+fashion vocabulary and keeping the best match on each attribute axis — garment,
+fit, material, pattern, sleeve, neckline, style — each its own softmax, which is
+why one attribute can be confident while another is a guess.
+
+```
+crop ─► vision encoder (on-device) ─► image vector ─┐
+                                                    ├─► cosine → softmax → label + confidence
+prompts ─► text encoder (BUILD TIME) ─► 132 vectors ┘
+```
+
+**The text side never runs in your browser.** The vocabulary is fixed, so its
+embeddings are a build artifact: `scripts/build_vocab_embeddings.py` computes them
+once and ships 264 KB of float32 in `models/`. That removes a 61 MB download and a
+slow in-browser encode pass. Only the vision encoder runs on-device.
+
+Colors do *not* come from the model — `segment.js` reads them off the garment
+pixels, which is more accurate and free.
+
+### Performance & caching
+
+| | |
+|---|---|
+| First run | ~9 s (downloads the vision encoder) |
+| Every run after | **~1.5 s for a full outfit** |
+| Download | 165 MB fp16 (WebGPU) or 85 MB q8 (WASM), cached by the browser |
+| Offline | works fully once cached |
+
+Inference runs in a Web Worker, so the UI never freezes. Results are saved into
+the outfit's metadata (`entry.shopping`), so re-opening is instant and inference
+runs at most once per outfit. Weights land in the Cache API; Settings → **On-device
+AI** shows how much is stored and can delete it.
+
+`dtype` is chosen per device: int8 kernels mostly fall back to scalar paths on
+WebGPU (~6 s/crop measured), while fp16 runs natively there — on CPU it's the
+reverse. Both are declared in `MODEL_REGISTRY`.
+
+### Swapping the model
+
+`js/models/fashionModel.js` holds an ordered registry; the worker uses the first
+entry that loads, so an unavailable model silently degrades to the next. To add
+one, append an entry (it needs ONNX weights laid out as
+`onnx/{text,vision}_model_*.onnx` plus a CLIP-style config and tokenizer) and run
+`python3 scripts/build_vocab_embeddings.py` to generate its vocabulary file — text
+and image vectors are only comparable within the same model's space.
+
+### What this costs in privacy
+
+Being precise, because it's the one thing that changed:
+
+- **Your photos still never leave the device.** No image, embedding, or search
+  phrase is transmitted. Inference is local.
+- **The app now downloads from two hosts** — `cdn.jsdelivr.net` (the runtime) and
+  `huggingface.co` (the weights). These are *downloads*, not uploads. The CSP
+  allows exactly these hosts and nothing else, and there is no `form-action`
+  target, so there is nowhere for data to be posted.
+- **Clicking a retailer link is a normal outbound navigation** you initiate, to
+  that retailer's public search page, carrying only the words shown on screen.
+- If you never open Find similar items, nothing is ever downloaded.
+
+### Manual product links
+
+Independently of the model, every wardrobe item has a "where to buy" field,
+rendered as an outbound link. Only `http`/`https` survive sanitizing —
+`javascript:` and `data:` URLs are rejected before reaching an `href`.
 
 ## Future AI (designed-for, not required)
 

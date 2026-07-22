@@ -31,6 +31,7 @@ export function renderSettings(container) {
   container.append(themeGroup(container));
   container.append(storageGroup(container));
   container.append(backupGroup(container));
+  container.append(modelGroup(container));
   container.append(aboutGroup());
   container.append(dangerGroup());
 }
@@ -257,6 +258,45 @@ async function configureAutoBackup(container) {
     ? `${PRESET_LABELS[choice.key]} backups on · ${r.copied} file${r.copied === 1 ? '' : 's'} mirrored ✓`
     : 'Backups scheduled — first run will ask for folder access');
   renderSettings(container);
+}
+
+/* ---------- on-device model ---------- */
+
+function modelGroup(container) {
+  const card = el('div', { class: 'set-card' });
+  const row = el('div', { class: 'set-row' }, icon('sparkles'),
+    el('span', { class: 'grow' }, 'Clothing model',
+      el('span', { class: 'sub', text: 'Checking…' })));
+  card.append(row);
+
+  (async () => {
+    const { modelCacheStatus, formatBytes } = await import('../cache/modelCache.js');
+    const st = await modelCacheStatus();
+    row.querySelector('.sub').textContent = st.cached
+      ? `${formatBytes(st.bytes)} downloaded · works offline`
+      : 'Not downloaded yet — downloads on first use';
+    if (st.cached) {
+      card.append(rowButton('trash', 'Delete downloaded model',
+        'Frees the space. It re-downloads next time you use Find similar items.',
+        async () => {
+          const ok = await confirmDialog({
+            title: 'Delete the clothing model?',
+            body: 'Only the downloaded model files are removed. Your photos, wardrobe and saved shopping descriptions are untouched.',
+            okLabel: 'Delete', danger: true,
+          });
+          if (!ok) return;
+          const { clearModelCache } = await import('../cache/modelCache.js');
+          const { releaseModel } = await import('../models/fashionModel.js');
+          releaseModel();
+          await clearModelCache();
+          toast('Model files deleted');
+          renderSettings(container);
+        }, true));
+    }
+  })();
+
+  return group('On-device AI', card,
+    'Find similar items runs a clothing model locally in your browser. The model is downloaded once from a public CDN and cached; your photos are never uploaded.');
 }
 
 /* ---------- about ---------- */

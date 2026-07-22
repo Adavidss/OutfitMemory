@@ -14,6 +14,7 @@
  *     thumbnail: "Thumbnails/2026/07/outfit_2026-07-21_thumb.webp",
  *     favorite, notes, tags[], colors[], palette[], weather,
  *     items: ["itm_ab12cd"],          // schema 2 — optional wardrobe links
+ *     shopping: {…},                  // schema 2 — cached "find similar" run
  *     width, height, bytes, addedAt
  *   }],
  *   items: [{                          // schema 2 — the optional wardrobe
