@@ -14,8 +14,10 @@ No account. No cloud. No server. Your photos never leave your device.
 - **Stats** — outfits recorded, current/longest streak, most photographed month, busiest weekday, most-worn colors, last-12-months chart.
 - **OutfitMemory Wrapped** — an auto-advancing, story-style yearly recap.
 - **Memories** — "On this day last year…" resurfaces old looks.
-- **Wardrobe (optional)** — tag clothing straight off your photos: drag roughly over a piece and *smart select* snaps to the garment using real person-parsing (skin, hair and background are excluded by pixel classification, not guesswork). The form shows the model's best guess with its probability — "Fleece jacket — 43% sure" — and prefills name and category. Planned outfits: save builder combinations as ideas and wear them later.
-- **Where to buy (optional, BYO key)** — with your own free Gemini key, an item's crop can be looked up online with Google Search grounding for real purchase links. Off by default; see [How tagging understands your photo](#how-tagging-understands-your-photo). You get real **cost-per-wear** (wear counts come from the photo log, not self-reporting), "worth a rewear" nudges, what-pairs-with-what, and an **outfit builder** that shuffles your own clothes into something to wear. Never required — the journal works untouched if you ignore it.
+- **Wardrobe (optional)** — tag clothing straight off your photos: drag roughly over a piece and *smart select* snaps to the garment using real person-parsing (skin, hair and background are excluded by pixel classification, not guesswork). You name it and pick the category — nothing is guessed. Tags and categories are one-tap chips.
+- **Wishlist & planned outfits** — keep wanted items separate from what you own (add them by pasting a shop's product image), move them across when you buy them, and save builder combinations as ideas to wear later.
+- **Wardrobe insights** — real **cost-per-wear** (wear counts come from the photo log, not self-reporting), "worth a rewear" nudges, what-pairs-with-what, and an **outfit builder** that shuffles your own clothes into something to wear. Never required — the journal works untouched if you ignore all of it.
+- **Where to buy (optional, BYO key)** — with your own free Gemini key, an item's crop can be looked up online with Google Search grounding for real purchase links. Off by default; see [How tagging understands your photo](#how-tagging-understands-your-photo).
 - **Themes** — Light, Dark, Mono, Retro Magazine, and Polaroid Scrapbook (plus Auto).
 - **Quality of life** — undo-able delete, ⤨ flashback (random outfit), bulk back-fill (multi-select from library, dated by photo file dates), tag autocomplete, cozy/compact grid toggle, "share as memory card" (polaroid-framed PNG composed on-device).
 - **PWA** — installable on your home screen, works fully offline.
@@ -52,7 +54,7 @@ OutfitMemory is *local-first by construction*, not by promise:
 | `metadata.json` (dates, notes, tags, colors) | Same folder / browser storage, mirrored to `localStorage` for crash recovery | Never |
 | Settings (theme, last view) | `localStorage` | Never |
 
-- **Nothing is ever uploaded.** The `Content-Security-Policy` permits exactly two off-origin hosts, both *download-only* and both used solely to fetch the on-device clothing model (`cdn.jsdelivr.net`, `huggingface.co`). There is no other `connect-src` host and no `form-action` target, so photos and metadata have nowhere to be posted — enforced by the browser, not by promise. Skip Find similar items and the app makes no network requests at all.
+- **Nothing is uploaded unless you opt in.** The `Content-Security-Policy` permits two *download-only* hosts, used solely to fetch the on-device clothing-detection model (`cdn.jsdelivr.net`, `storage.googleapis.com`), plus `generativelanguage.googleapis.com` — which stays unreachable until you configure your own Gemini key for "Find where to buy". There is no `form-action` target, so photos and metadata have nowhere else to be posted — enforced by the browser, not by promise. Skip the optional features and the app makes no network requests at all.
 - **EXIF stripped.** Photos are re-encoded through a canvas on save, which removes all metadata (GPS location, device model, etc.) from stored files.
 - **You own the archive.** It's a plain folder:
 
@@ -71,7 +73,7 @@ Readable in 20 years with no app at all. `metadata.json` is derived data in spir
 ```json
 {
   "app": "OutfitMemory",
-  "schema": 1,
+  "schema": 2,
   "entries": [{
     "id": "2026-07-21-001",
     "date": "2026-07-21",
@@ -96,8 +98,12 @@ Readable in 20 years with no app at all. `metadata.json` is derived data in spir
     "price": 89,
     "currency": "USD",
     "link": "",
+    "notes": "",
+    "tags": ["work"],
+    "wish": false,
     "thumb": "Items/itm_ab12cd.webp"
-  }]
+  }],
+  "plans": [{ "id": "plan_x", "items": ["itm_ab12cd"], "note": "", "createdAt": "…" }]
 }
 ```
 
@@ -126,16 +132,12 @@ js/
   colors.js           dominant-color analyzer (first "AI" plugin point)
   segment.js          garment segmentation: parser-backed smart paths + heuristic fallback
   wardrobe.js         item analytics + the outfit recombination engine
-  models/             personParser (MediaPipe pixel classes) · fashionModel (CLIP registry/worker)
-  workers/            inferenceWorker — FashionCLIP off the main thread
+  models/             personParser — MediaPipe pixel classes (clothes vs skin/hair/bg)
   search/             whereToBuy (optional Gemini lookup) · shoppingSearch (retailer URLs)
-  cache/              modelCache — what's downloaded, and deleting it
-  utils/              clothingParser — the fashion vocabulary
   storage/            folderStorage (FS Access) · browserStorage (IndexedDB)
   views/              gallery · calendar · stats · wrapped · detail · capture · settings · onboarding
-                      wardrobeView · itemTagger · outfitBuilder
-models/               precomputed vocabulary embeddings (built, not hand-edited)
-scripts/              generate_icons.py · build_vocab_embeddings.py
+                      wardrobeView · itemTagger · outfitBuilder · shareOutfit
+scripts/              generate_icons.py
   ui/                 dom helpers · svg icons
   util/               dates/streaks · idb wrapper · zip writer+reader
 sw.js                 offline cache (bump CACHE on deploy)
@@ -179,16 +181,13 @@ person the model recognizes, the old color-heuristic segmentation takes over.
 Settings → Storage → **Recalculate colors** re-reads existing archives with the
 current engine.
 
-**2. Garment identification.** When you tag a piece, [Marqo
-FashionCLIP](https://huggingface.co/Marqo/marqo-fashionCLIP) (Transformers.js /
-ONNX Runtime Web, in a Web Worker) scores the crop against a fashion vocabulary
-and the form shows the single most probable garment **with its probability** —
-"Fleece jacket — 43% sure" — and prefills the name and category. The text side of
-CLIP never runs in your browser: the vocabulary is fixed, so its embeddings are
-precomputed by `scripts/build_vocab_embeddings.py` and shipped as 264 KB of
-float32. Weights (165 MB fp16 on WebGPU / 85 MB q8 on WASM) download only when
-identification is enabled in Settings — or automatically once already cached —
-never as a surprise. Classification is ~1.5 s warm.
+**2. You name it.** Nothing about the garment is guessed. An earlier version ran
+FashionCLIP to prefill the name and category; it was removed because a confident
+wrong label is worse than an empty field — harder to notice, harder to correct,
+and it quietly poisoned the wardrobe with names nobody chose. The form now opens
+with an empty name and **no category selected**, category and tags are one-tap
+chips, and notes are inline. The only thing pre-filled is the detected colour,
+which comes from the garment's own pixels rather than a model's opinion.
 
 **3. Where to buy (optional, off by default, the ONE online feature).** Every
 wardrobe item can have a manual product link (http/https only). Beyond that, if
@@ -203,11 +202,34 @@ mirrors never contain it.
 
 ### Network policy, precisely
 
-The CSP allows download-only fetches from `cdn.jsdelivr.net` (runtimes),
-`huggingface.co` (FashionCLIP weights) and `storage.googleapis.com` (the person
-parser), plus — solely for the opt-in feature above —
-`generativelanguage.googleapis.com`. There is no `form-action` target. Skip the
-optional features and the app makes no network requests at all.
+The CSP allows download-only fetches from `cdn.jsdelivr.net` and
+`storage.googleapis.com` (the person-parsing runtime and model), plus — solely
+for the opt-in feature above — `generativelanguage.googleapis.com`. There is no
+`form-action` target. Skip the optional features and the app makes no network
+requests at all.
+
+## Wishlist
+
+The Wardrobe tab has two halves: **Owned** and **Wishlist**. Wanted items live in
+the same `items[]` array with `wish: true`, which keeps one search index and one
+set of screens — but they are excluded from the outfit builder, cost-per-wear and
+every insight, because suggesting something you don't own would be nonsense. When
+you buy one, "I bought this" flips it to owned and stamps `acquiredAt`.
+
+**Adding an item from a shop:** copy the product image (right-click → Copy Image,
+or long-press → Copy on mobile) and paste it into the add dialog; drag-drop and
+file upload work too. Pasting rather than "fetch this URL" is deliberate — URL
+fetching would need the app to reach any host on the web, the exact capability
+this app is built not to have, and it would mostly fail anyway since shop CDNs
+rarely send CORS headers, leaving the canvas tainted and the image un-encodable.
+
+## Sharing
+
+Outfit photos share as a polaroid **memory card**. Builder suggestions and saved
+plans share as an **outfit card** — the pieces laid out on the brand gradient with
+their names. Both are composed on a local canvas and only go anywhere if you pick
+a destination in the system share sheet; browsers without file sharing download
+the PNG instead.
 
 ## Future AI (designed-for, not required)
 

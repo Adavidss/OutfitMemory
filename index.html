@@ -9,8 +9,7 @@
     `default-src 'self'` blocks everything by default. The exceptions:
 
     DOWNLOAD-ONLY (fetch models/runtimes, nothing is sent):
-      • cdn.jsdelivr.net — transformers.js + MediaPipe runtimes (script/wasm)
-      • huggingface.co / *.hf.co — FashionCLIP weights
+      • cdn.jsdelivr.net — MediaPipe vision runtime (script/wasm)
       • storage.googleapis.com — MediaPipe person-parsing model
 
     UPLOAD-CAPABLE, OPT-IN (exists for exactly one feature):
@@ -27,7 +26,7 @@
                  media-src blob:;
                  style-src 'self';
                  script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net;
-                 connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co https://storage.googleapis.com https://generativelanguage.googleapis.com;
+                 connect-src 'self' blob: data: https://cdn.jsdelivr.net https://storage.googleapis.com https://generativelanguage.googleapis.com;
                  worker-src 'self' blob:;
                  child-src 'self' blob:;
                  manifest-src 'self';

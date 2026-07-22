@@ -12,6 +12,7 @@
  */
 
 import { store } from '../store.js';
+import { shareOutfit } from './shareOutfit.js';
 import { el, openOverlay, sheet, toast, haptic } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { NAME_HEX } from '../colors.js';
@@ -29,7 +30,14 @@ export function openOutfitBuilder() {
   const shuffleBtn = el('button', { class: 'btn btn-hero btn-block' }, icon('shuffle'), 'Shuffle');
   const wearBtn = el('button', { class: 'btn btn-block' }, icon('camera'), 'Wear this today');
   const saveBtn = el('button', { class: 'btn btn-block' }, icon('heart'), 'Save as idea');
+  const shareBtn = el('button', { class: 'icon-btn', 'aria-label': 'Share this outfit' }, icon('share'));
   const closeBtn = el('button', { class: 'icon-btn', 'aria-label': 'Close' }, icon('x'));
+
+  shareBtn.addEventListener('click', () => {
+    const chosen = Object.values(picks).filter(Boolean);
+    if (!chosen.length) return toast('Shuffle up an outfit first ✨');
+    shareOutfit(chosen, "Today's outfit");
+  });
 
   const root = el('div', { class: 'builder' },
     el('div', { class: 'lb-top' },
@@ -37,7 +45,7 @@ export function openOutfitBuilder() {
       el('div', { class: 'lb-title' },
         el('b', { text: "Today's outfit" }),
         el('span', { text: 'Tap a piece to swap · lock what you like' })),
-      el('span', { class: 'icon-btn-spacer' })),
+      shareBtn),
     slotsBox,
     el('div', { class: 'builder-actions' }, shuffleBtn,
       el('div', { class: 'builder-secondary' }, saveBtn, wearBtn)));

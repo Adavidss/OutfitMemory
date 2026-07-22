@@ -277,53 +277,34 @@ async function configureAutoBackup(container) {
 function modelGroup(container) {
   const card = el('div', { class: 'set-card' });
   const row = el('div', { class: 'set-row' }, icon('sparkles'),
-    el('span', { class: 'grow' }, 'Clothing model',
+    el('span', { class: 'grow' }, 'Clothing detection',
       el('span', { class: 'sub', text: 'Checking…' })));
   card.append(row);
 
   (async () => {
-    const { modelCacheStatus, formatBytes } = await import('../cache/modelCache.js');
-    const st = await modelCacheStatus();
-    row.querySelector('.sub').textContent = st.cached
-      ? `${formatBytes(st.bytes)} downloaded · works offline`
-      : 'Not downloaded yet — downloads on first use';
-    if (st.cached) {
+    const { parserCached, clearParserCache } = await import('../models/personParser.js');
+    const cached = await parserCached();
+    row.querySelector('.sub').textContent = cached
+      ? 'Downloaded · separates clothes from skin, hair and background offline'
+      : 'Downloads on first use (~17 MB), then works offline';
+    if (cached) {
       card.append(rowButton('trash', 'Delete downloaded model',
-        'Frees the space. It re-downloads next time you use Find similar items.',
-        async () => {
+        'Frees the space. It re-downloads next time you tag a piece.', async () => {
           const ok = await confirmDialog({
-            title: 'Delete the clothing model?',
-            body: 'Only the downloaded model files are removed. Your photos, wardrobe and saved shopping descriptions are untouched.',
+            title: 'Delete the detection model?',
+            body: 'Only the downloaded model files are removed. Your photos and wardrobe are untouched.',
             okLabel: 'Delete', danger: true,
           });
           if (!ok) return;
-          const { clearModelCache } = await import('../cache/modelCache.js');
-          const { releaseModel } = await import('../models/fashionModel.js');
-          releaseModel();
-          await clearModelCache();
+          await clearParserCache();
           toast('Model files deleted');
           renderSettings(container);
         }, true));
     }
   })();
 
-  // Auto-identify toggle: classification names new items ("Sweater — 84%")
-  // while tagging. Off by default so tagging never triggers a surprise
-  // download; it turns itself on implicitly once the model is cached.
-  const idRow = el('button', { class: 'set-row tappable' }, icon('sparkles'),
-    el('span', { class: 'grow' }, 'Identify items while tagging',
-      el('span', { class: 'sub', text: store.settings.autoIdentify
-        ? 'On — new items get a name and confidence from the model'
-        : 'Off — turns on automatically once the model is downloaded' })),
-    el('span', { text: store.settings.autoIdentify ? 'On' : 'Auto' }));
-  idRow.addEventListener('click', () => {
-    store.saveSettings({ autoIdentify: !store.settings.autoIdentify });
-    renderSettings(container);
-  });
-  card.append(idRow);
-
-  return group('On-device AI', card,
-    'Tagging can identify each piece with a clothing model that runs locally in your browser (downloaded once, cached, offline afterwards). Your photos are never uploaded by this feature.');
+  return group('On-device detection', card,
+    'Tagging uses a local model to tell clothing apart from skin, hair and background, so colours and crops follow the garment. It runs entirely in your browser — your photos are never uploaded by this feature.');
 }
 
 /* ---------- online item search (user's own Gemini key) ---------- */

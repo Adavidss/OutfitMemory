@@ -13,11 +13,19 @@ import { store } from '../store.js';
 import { cropToItem } from '../imagePipeline.js';
 import { smartSegment } from '../segment.js';
 import { warmParser } from '../models/personParser.js';
-import { classifyCrop, classifierReady } from '../models/fashionModel.js';
 import { el, openOverlay, toast, sheet, haptic } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { NAME_HEX } from '../colors.js';
 import { CATEGORIES, catLabel, safeUrl } from '../wardrobe.js';
+
+/**
+ * Starter tags offered as one-tap chips, alongside whatever the user has
+ * already used elsewhere in their wardrobe.
+ */
+const QUICK_TAGS = [
+  'work', 'casual', 'going out', 'formal', 'gym', 'comfy',
+  'summer', 'winter', 'rain', 'travel', 'layering',
+];
 
 const MIN_BOX = 0.045; // ignore accidental micro-drags (fraction of image)
 
@@ -64,13 +72,16 @@ export function openItemTagger(entryId) {
   const doneBtn = el('button', { class: 'btn btn-sm btn-primary' }, icon('check'), 'Done');
   const closeBtn = el('button', { class: 'icon-btn', 'aria-label': 'Close' }, icon('x'));
 
+  // The hint + chips scroll; the action buttons sit outside that scroller so
+  // a wardrobe with many tagged pieces can never push them off-screen.
   const root = el('div', { class: 'tagger' },
     el('div', { class: 'lb-top' },
       closeBtn,
       el('div', { class: 'lb-title' }, el('b', { text: 'Tag clothing' })),
       el('span', { class: 'icon-btn-spacer' })),
     stage,
-    el('div', { class: 'tag-panel' }, hint, chipRow,
+    el('div', { class: 'tag-panel' },
+      el('div', { class: 'tag-scroll' }, hint, chipRow),
       el('div', { class: 'tag-actions' }, pickBtn, doneBtn)));
 
   const { close } = openOverlay(root, { variant: 'full' });
@@ -199,20 +210,6 @@ export function openItemTagger(entryId) {
   stage.addEventListener('pointercancel', () => { start = null; marquee.hidden = true; });
 }
 
-/**
- * Guess the garment slot from where the box sits vertically on the body.
- * Zones follow a typical full-length mirror shot: head to ~0.3, torso to
- * ~0.6, legs to ~0.85, feet below that. It's only a default — the form
- * puts the category picker right there.
- */
-function guessCategory({ y0, h }) {
-  const mid = y0 + h / 2;
-  if (h > 0.55) return 'dress';        // a tall box covers a whole one-piece
-  if (mid < 0.56) return 'top';
-  if (mid < 0.85) return 'bottom';
-  return 'shoes';
-}
-
 async function createFromCrop(entryId, img, frac, onDone, onHighlight) {
   const nw = img.naturalWidth;
   const nh = img.naturalHeight;
@@ -241,36 +238,18 @@ async function createFromCrop(entryId, img, frac, onDone, onHighlight) {
     return toast('Could not read that part of the photo');
   }
 
+  // Name and category are left for the user. Auto-guessing both was worse
+  // than useless: a confident wrong label is harder to notice and correct
+  // than an empty field. Detected colour is still offered, since it comes
+  // from the actual garment pixels rather than a guess.
   const color = crop.colors?.[0] || '';
-  // Position gives the starting category; the classifier refines it below.
-  let category = guessCategory({ y0: rect.y / nh, h: rect.h / nh });
-  let suggested = color
-    ? `${color[0].toUpperCase()}${color.slice(1)} ${catLabel(category).toLowerCase()}`
-    : catLabel(category);
-
-  // Identify with FashionCLIP when it's available (already downloaded or
-  // enabled in Settings): the form then shows the top guess + probability.
-  let identified = null;
-  if (await classifierReady()) {
-    try {
-      const bmp = await createImageBitmap(crop.blob);
-      identified = await classifyCrop(bmp, category);
-    } catch { /* naming falls back to color+position */ }
-  }
-  if (identified?.garment) {
-    category = identified.category || category;
-    suggested = color
-      ? `${color[0].toUpperCase()}${color.slice(1)} ${identified.garment}`
-      : identified.garment[0].toUpperCase() + identified.garment.slice(1);
-  }
 
   const fields = await itemForm({
     title: 'New item',
     crop,
-    identified,
     initial: {
-      name: suggested,
-      category,
+      name: '',
+      category: '',
       color,
       hex: crop.palette?.[0]?.hex || NAME_HEX[color] || '',
     },
@@ -304,26 +283,177 @@ async function pickExisting(entryId, onDone) {
   });
 }
 
+/* ================= add an item without an outfit photo ================= */
+
+/**
+ * openAddItem({ wish }) — create a wardrobe or wishlist item from a picture
+ * that isn't one of your outfit photos: a product shot from a shop, a
+ * screenshot, anything.
+ *
+ * Paste / upload / drop rather than "fetch this URL", deliberately:
+ *   • fetching arbitrary URLs would need the app to reach any host on the
+ *     web, which is exactly the capability this app is built not to have;
+ *   • and it wouldn't even work — shop CDNs rarely send CORS headers, so
+ *     the canvas would be tainted and the image un-encodable.
+ * Copying an image (long-press → Copy on mobile, right-click → Copy on
+ * desktop) and pasting it here keeps everything local and always works.
+ */
+export function openAddItem({ wish = false } = {}) {
+  const fileInput = el('input', { type: 'file', accept: 'image/*', hidden: true });
+  const drop = el('div', { class: 'drop-zone', tabindex: '0', role: 'button',
+    'aria-label': 'Paste, drop or choose an image' },
+    icon('image'),
+    el('b', { text: 'Paste an image' }),
+    el('span', { text: 'Copy a photo from a shop, then paste here (⌘/Ctrl+V). You can also drop a file or tap to browse.' }));
+
+  const uploadBtn = el('button', { class: 'btn btn-block' }, icon('upload'), 'Choose image');
+  const skipBtn = el('button', { class: 'link-btn', text: wish ? 'Add without a picture' : 'Add without a picture' });
+  const cancelBtn = el('button', { class: 'sheet-cancel', text: 'Cancel' });
+
+  const card = el('div', { class: 'sheet-card', role: 'dialog' },
+    el('div', { class: 'sheet-grip' }),
+    el('div', { class: 'sheet-title', text: wish ? 'Add a wanted item' : 'Add an item' }),
+    drop, uploadBtn, skipBtn, cancelBtn, fileInput);
+
+  const { close } = openOverlay(card, {
+    onClose: () => document.removeEventListener('paste', onPaste),
+  });
+  cancelBtn.addEventListener('click', () => close());
+
+  const onPaste = (e) => {
+    const item = [...(e.clipboardData?.items || [])].find((i) => i.type.startsWith('image/'));
+    if (!item) return;
+    e.preventDefault();
+    const f = item.getAsFile();
+    if (f) handle(f);
+  };
+
+  const handle = async (blob) => {
+    close();
+    await buildFromImage(blob, wish);
+  };
+
+  uploadBtn.addEventListener('click', () => fileInput.click());
+  drop.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files?.[0];
+    if (f) handle(f);
+  });
+
+  drop.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+  drop.addEventListener('drop', (e) => {
+    e.preventDefault();
+    drop.classList.remove('over');
+    const f = [...(e.dataTransfer?.files || [])].find((x) => x.type.startsWith('image/'));
+    if (f) handle(f);
+    else toast('That wasn’t an image');
+  });
+
+  document.addEventListener('paste', onPaste);
+
+  skipBtn.addEventListener('click', async () => {
+    close();
+    const fields = await itemForm({ title: wish ? 'Wanted item' : 'New item', wish });
+    if (!fields) return;
+    await store.addItem(fields, null);
+    toast(wish ? 'Added to your wishlist ✓' : 'Added to your wardrobe ✓');
+  });
+}
+
+/** Shared tail: encode the picked image, then collect details. */
+async function buildFromImage(blob, wish) {
+  let crop;
+  try {
+    const bmp = await createImageBitmap(blob);
+    crop = await cropToItem(bmp, { x: 0, y: 0, w: bmp.width, h: bmp.height });
+    bmp.close?.();
+  } catch {
+    return toast('Could not read that image');
+  }
+  const color = crop.colors?.[0] || '';
+  const fields = await itemForm({
+    title: wish ? 'Wanted item' : 'New item',
+    crop,
+    wish,
+    initial: { name: '', category: '', color, hex: crop.palette?.[0]?.hex || NAME_HEX[color] || '' },
+  });
+  if (!fields) return;
+  await store.addItem(fields, crop);
+  toast(wish ? 'Added to your wishlist ✓' : 'Added to your wardrobe ✓');
+}
+
 /* ================= item form (create + edit) ================= */
 
 /**
- * itemForm({ title, crop, initial, identified }) → fields | null
- * Shared by the tagger and the wardrobe editor. `identified` is the
- * classifier's verdict — the single top garment and its probability.
+ * itemForm({ title, crop, initial, wish }) → fields | null
+ * Shared by the tagger, the "add item" flow and the wardrobe editor.
+ *
+ * Nothing about the garment is guessed. Category is a row of tap targets
+ * (faster than a dropdown on a phone, and it starts unset so an unnoticed
+ * default can't be saved), tags are one-tap chips, and notes are inline.
  */
-export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL = null, identified = null } = {}) {
+export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL = null, wish = false } = {}) {
   return new Promise((resolve) => {
     let settled = false;
     const done = (v) => { if (!settled) { settled = true; resolve(v); } };
 
     const name = el('input', { type: 'text', value: initial.name || '', maxlength: '80',
-      placeholder: 'Name', 'aria-label': 'Item name' });
+      placeholder: wish ? 'What do you want? e.g. black leather boots' : 'Name this item',
+      'aria-label': 'Item name' });
 
-    const category = el('select', { 'aria-label': 'Category' },
-      CATEGORIES.map((c) => el('option', {
-        value: c.id, text: `${c.emoji}  ${c.label}`,
-        selected: (initial.category || 'top') === c.id || null,
-      })));
+    /* ---- category: quick-tap chips, no default ---- */
+    let category = initial.category || '';
+    const catRow = el('div', { class: 'pick-row', role: 'group', 'aria-label': 'Category' },
+      CATEGORIES.map((c) => {
+        const b = el('button', {
+          class: `pick${category === c.id ? ' on' : ''}`,
+          'aria-pressed': category === c.id ? 'true' : 'false',
+        }, `${c.emoji} ${c.label}`);
+        b.addEventListener('click', () => {
+          category = c.id;
+          catRow.querySelectorAll('.pick').forEach((x) => {
+            x.classList.remove('on');
+            x.setAttribute('aria-pressed', 'false');
+          });
+          b.classList.add('on');
+          b.setAttribute('aria-pressed', 'true');
+        });
+        return b;
+      }));
+
+    /* ---- tags: quick chips + free text ---- */
+    const chosen = new Set(initial.tags || []);
+    const tagInput = el('input', { type: 'text', placeholder: 'Add your own tag…',
+      'aria-label': 'Custom tag' });
+    const suggestions = [...new Set([...store.itemTags(), ...QUICK_TAGS])].slice(0, 16);
+    const tagRow = el('div', { class: 'pick-row', role: 'group', 'aria-label': 'Tags' });
+
+    const paintTags = () => {
+      const all = [...new Set([...chosen, ...suggestions])];
+      tagRow.replaceChildren(...all.map((t) => {
+        const on = chosen.has(t);
+        const b = el('button', { class: `pick${on ? ' on' : ''}`, 'aria-pressed': on ? 'true' : 'false' }, t);
+        b.addEventListener('click', () => {
+          chosen.has(t) ? chosen.delete(t) : chosen.add(t);
+          paintTags();
+        });
+        return b;
+      }));
+    };
+    paintTags();
+
+    tagInput.addEventListener('keydown', (ev) => {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      const t = tagInput.value.trim().toLowerCase();
+      if (t) { chosen.add(t); tagInput.value = ''; paintTags(); }
+    });
+
+    const notes = el('textarea', { class: 'lb-notes', rows: '2',
+      placeholder: 'Notes (fit, where it came from, what it goes with…)',
+      'aria-label': 'Notes' });
+    notes.value = initial.notes || '';
 
     const brand = el('input', { type: 'text', value: initial.brand || '', maxlength: '60',
       placeholder: 'Brand (optional)', 'aria-label': 'Brand' });
@@ -335,7 +465,8 @@ export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL =
     });
 
     const link = el('input', { type: 'url', value: initial.link || '',
-      placeholder: 'Where to buy / product link (optional)', 'aria-label': 'Link' });
+      placeholder: wish ? 'Product link' : 'Where to buy / product link (optional)',
+      'aria-label': 'Link' });
 
     // Preview of the crop this item was cut from.
     const preview = el('img', { class: 'item-form-thumb', alt: '' });
@@ -349,18 +480,9 @@ export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL =
 
     const swatch = initial.hex || NAME_HEX[initial.color] || null;
 
-    const saveBtn = el('button', { class: 'btn btn-hero btn-block' }, icon('check'), 'Save item');
+    const saveBtn = el('button', { class: 'btn btn-hero btn-block' }, icon('check'),
+      wish ? 'Add to wishlist' : 'Save item');
     const cancelBtn = el('button', { class: 'sheet-cancel', text: 'Cancel' });
-
-    // The classifier's single best guess, with its probability, per request:
-    // "Sweater — 84% sure".
-    const idLine = identified?.garment
-      ? el('div', { class: 'item-form-id' },
-          icon('sparkles'),
-          el('span', {},
-            el('b', { text: identified.garment[0].toUpperCase() + identified.garment.slice(1) }),
-            ` — ${Math.round(identified.confidence * 100)}% sure`))
-      : null;
 
     const card = el('div', { class: 'sheet-card item-form', role: 'dialog', 'aria-label': title },
       el('div', { class: 'sheet-grip' }),
@@ -368,12 +490,17 @@ export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL =
         (crop?.blob || thumbURL) ? preview : null,
         el('div', { class: 'grow' },
           el('div', { class: 'sheet-title', text: title }),
-          idLine,
           swatch ? el('div', { class: 'item-form-color' },
             el('i', { class: 'mini-dot', style: { background: swatch } }),
             el('span', { text: initial.color || 'color detected' })) : null)),
       el('label', { class: 'field' }, icon('sparkles'), name),
-      el('label', { class: 'field' }, icon('grid'), category),
+      el('div', { class: 'form-label', text: 'Category' }),
+      catRow,
+      el('div', { class: 'form-label', text: 'Tags' }),
+      tagRow,
+      el('label', { class: 'field' }, icon('tag'), tagInput),
+      el('div', { class: 'form-label', text: 'Notes' }),
+      notes,
       el('div', { class: 'cap-row' },
         el('label', { class: 'field' }, icon('palette'), brand),
         el('label', { class: 'field field-price' }, el('span', { class: 'cur', text: currencySymbol() }), price)),
@@ -384,17 +511,22 @@ export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL =
     cancelBtn.addEventListener('click', () => close());
 
     saveBtn.addEventListener('click', () => {
+      if (!name.value.trim()) { name.focus(); return toast('Give it a name first'); }
+      if (!category) return toast('Pick a category');
       const raw = link.value.trim();
       if (raw && !safeUrl(raw)) return toast('That link doesn’t look like a web address');
       const parsed = parseFloat(price.value);
       done({
-        name: name.value.trim() || initial.name || 'Item',
-        category: category.value,
+        name: name.value.trim(),
+        category,
         color: initial.color || '',
         hex: initial.hex || '',
         brand: brand.value.trim(),
         price: Number.isFinite(parsed) && parsed >= 0 ? parsed : null,
         link: raw ? safeUrl(raw) : '',
+        notes: notes.value.trim(),
+        tags: [...chosen],
+        wish,
         currency: store.settings.currency || 'USD',
       });
       close();

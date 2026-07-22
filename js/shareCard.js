@@ -29,6 +29,73 @@ function drawCover(g, src, sw, sh, x, y, w, h) {
   g.drawImage(src, (sw - cw) / 2, (sh - ch) / 2, cw, ch, x, y, w, h);
 }
 
+/**
+ * Build a shareable card for a *combination* of wardrobe items — the
+ * outfit builder's suggestion, or a saved plan. Each piece's crop is laid
+ * out on the brand gradient with its name underneath.
+ */
+export async function buildOutfitCard(items, title = 'Outfit idea') {
+  const list = items.filter(Boolean).slice(0, 6);
+  if (!list.length) throw new Error('nothing to share');
+
+  const c = document.createElement('canvas');
+  c.width = W;
+  c.height = H;
+  const g = c.getContext('2d');
+
+  const grad = g.createLinearGradient(0, 0, W, H);
+  grad.addColorStop(0, '#7C5CFF');
+  grad.addColorStop(1, '#FF7AA2');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, W, H);
+
+  g.fillStyle = '#fff';
+  g.textAlign = 'center';
+  g.font = '700 68px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  g.fillText(title, W / 2, 150);
+
+  const cols = list.length <= 2 ? 1 : 2;
+  const rows = Math.ceil(list.length / cols);
+  const pad = 70;
+  const gap = 40;
+  const tileW = (W - pad * 2 - gap * (cols - 1)) / cols;
+  const tileH = Math.min(430, (H - 330 - gap * (rows - 1)) / rows);
+  const startY = 230;
+
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i];
+    const cx = pad + (i % cols) * (tileW + gap);
+    const cy = startY + Math.floor(i / cols) * (tileH + gap);
+    const imgH = tileH - 74;
+
+    g.save();
+    roundedRectPath(g, cx, cy, tileW, imgH, 28);
+    g.fillStyle = 'rgba(255,255,255,0.18)';
+    g.fill();
+    g.clip();
+    const blob = item.thumb ? await store.adapter.readFile(item.thumb) : null;
+    if (blob) {
+      const bmp = await createImageBitmap(blob);
+      drawCover(g, bmp, bmp.width, bmp.height, cx, cy, tileW, imgH);
+      bmp.close?.();
+    }
+    g.restore();
+
+    g.fillStyle = '#fff';
+    g.textAlign = 'center';
+    g.font = '600 34px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    const name = item.name.length > 26 ? `${item.name.slice(0, 25)}…` : item.name;
+    g.fillText(name, cx + tileW / 2, cy + imgH + 50);
+  }
+
+  g.globalAlpha = 0.85;
+  g.font = '600 30px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+  g.fillText('OutfitMemory', W / 2, H - 60);
+  g.globalAlpha = 1;
+
+  return new Promise((res) => c.toBlob(res, 'image/png'));
+}
+
 /** Build the card as a PNG blob for the given entry. */
 export async function buildMemoryCard(entry) {
   const blob = await store.imageBlob(entry);

@@ -20,7 +20,8 @@
  *   items: [{                          // schema 2 — the optional wardrobe
  *     id: "itm_ab12cd", name: "Navy crew sweater", category: "top",
  *     color: "navy", hex: "#26324f", brand, price, currency, link, notes,
- *     thumb: "Items/itm_ab12cd.webp", createdAt
+ *     tags: ["work"], wish: false,     // wish = wanted, not owned yet
+ *     thumb: "Items/itm_ab12cd.webp", createdAt, acquiredAt
  *   }]
  * }
  * Unknown top-level/entry fields are preserved on load+save, so future
@@ -46,7 +47,6 @@ const DEFAULT_SETTINGS = {
   memoryDismissed: '',    // date the "on this day" banner was dismissed
   gridDensity: 'cozy',    // 'cozy' | 'compact' gallery grid
   backup: { preset: 'off', lastRun: '', folderName: '' }, // see js/backup.js
-  autoIdentify: false,    // classify crops while tagging even if not cached yet
   geminiKey: '',          // user's own key for optional online lookup (never exported)
 };
 
@@ -299,10 +299,16 @@ class Store extends EventTarget {
 
   /* ================= wardrobe items (optional layer) ================= */
 
-  /** Every wardrobe item, newest first. Empty until the user tags one. */
-  items() {
-    return [...(this.meta?.items || [])].sort((a, b) =>
+  /**
+   * Wardrobe items, newest first.
+   * `wish`: false → owned only (the default — what you can actually wear),
+   *         true  → the wishlist, undefined → everything.
+   */
+  items(wish = false) {
+    const all = [...(this.meta?.items || [])].sort((a, b) =>
       (b.createdAt || '').localeCompare(a.createdAt || ''));
+    if (wish === undefined) return all;
+    return all.filter((i) => !!i.wish === wish);
   }
 
   itemById(id) {
@@ -341,6 +347,8 @@ class Store extends EventTarget {
       currency: fields.currency || this.settings.currency || 'USD',
       link: fields.link || '',
       notes: (fields.notes || '').trim(),
+      tags: Array.isArray(fields.tags) ? fields.tags.filter(Boolean) : [],
+      wish: !!fields.wish,
       thumb,
       createdAt: new Date().toISOString(),
     };
@@ -407,6 +415,26 @@ class Store extends EventTarget {
 
   itemThumbURL(item) {
     return item?.thumb ? this.#url(item.thumb) : Promise.resolve(null);
+  }
+
+  /** Wishlist → owned ("I bought this"), or back again. */
+  async setWish(id, wish) {
+    const it = this.itemById(id);
+    if (!it) return null;
+    it.wish = !!wish;
+    if (!wish) it.acquiredAt = new Date().toISOString();
+    await this.#saveMeta();
+    this.emit();
+    return it;
+  }
+
+  /** Every tag used across the wardrobe, most-used first (quick-pick chips). */
+  itemTags() {
+    const counts = new Map();
+    for (const i of this.meta?.items || []) {
+      for (const t of i.tags || []) counts.set(t, (counts.get(t) || 0) + 1);
+    }
+    return [...counts.entries()].sort((a, b) => b[1] - a[1]).map(([t]) => t);
   }
 
   /* ================= planned outfits ================= */

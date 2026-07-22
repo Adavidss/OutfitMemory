@@ -15,14 +15,16 @@ import {
   CATEGORIES, catLabel, catEmoji, itemStats, pairsWith, insights,
   formatPrice, safeUrl, linkHost, canSuggest,
 } from '../wardrobe.js';
-import { itemForm } from './itemTagger.js';
+import { itemForm, openAddItem } from './itemTagger.js';
 import { openOutfitBuilder } from './outfitBuilder.js';
 import { openDetail } from './detail.js';
 import { hasGeminiKey, identifyItem } from '../search/whereToBuy.js';
 import { RETAILERS } from '../search/shoppingSearch.js';
+import { shareOutfit } from './shareOutfit.js';
 
-// Survives re-renders, not reloads.
-const filter = { q: '', cat: '', sort: 'recent' };
+// Survives re-renders, not reloads. `wish` switches between the clothes you
+// own and the ones you want.
+const filter = { q: '', cat: '', sort: 'recent', wish: false };
 
 const SORTS = {
   recent: { label: 'Recently added', fn: (a, b) => (b.item.createdAt || '').localeCompare(a.item.createdAt || '') },
@@ -35,33 +37,81 @@ const SORTS = {
 export function renderWardrobe(container) {
   container.replaceChildren();
 
-  const items = store.items();
-  if (!items.length) return container.append(emptyState());
+  const owned = store.items(false);
+  const wished = store.items(true);
+  if (!owned.length && !wished.length) return container.append(emptyState());
 
-  container.append(el('h1', { class: 'view-title', text: 'Wardrobe' }));
+  const addBtn = el('button', { class: 'icon-btn', 'aria-label': 'Add an item', title: 'Add an item' },
+    icon('plus'));
+  addBtn.addEventListener('click', () => openAddItem({ wish: filter.wish }));
+  container.append(el('div', { class: 'view-head' },
+    el('h1', { class: 'view-title', text: 'Wardrobe' }), addBtn));
 
-  // Build an outfit — the payoff for tagging.
-  const buildBtn = el('button', { class: 'wardrobe-cta' },
-    el('span', { class: 'grow' },
-      el('b', { text: 'Build an outfit' }),
-      el('span', { text: canSuggest()
-        ? 'Shuffle your own clothes into something to wear'
-        : 'Tag a top and a bottom to unlock suggestions' })),
-    icon('shuffle'));
-  buildBtn.disabled = !canSuggest();
-  buildBtn.addEventListener('click', () => openOutfitBuilder());
-  container.append(buildBtn);
+  // Owned ⇄ Wishlist. The wishlist is deliberately separate: wanted items
+  // must never be suggested as something you could wear today.
+  const seg = el('div', { class: 'segmented', role: 'tablist' },
+    [[false, `Owned${owned.length ? ` ${owned.length}` : ''}`],
+     [true, `Wishlist${wished.length ? ` ${wished.length}` : ''}`]].map(([v, label]) => {
+      const b = el('button', {
+        class: `seg${filter.wish === v ? ' on' : ''}`, role: 'tab',
+        'aria-selected': filter.wish === v ? 'true' : 'false',
+      }, label);
+      b.addEventListener('click', () => { filter.wish = v; renderWardrobe(container); });
+      return b;
+    }));
+  container.append(seg);
 
-  const plansBox = plansCard(container);
-  if (plansBox) container.append(plansBox);
+  const items = filter.wish ? wished : owned;
+  if (!items.length) {
+    container.append(el('div', { class: 'empty' },
+      el('div', { class: 'empty-art' }, icon(filter.wish ? 'heart' : 'hanger')),
+      el('h2', { text: filter.wish ? 'Nothing on the wishlist yet' : 'No items yet' }),
+      el('p', { text: filter.wish
+        ? 'Saw something you want? Copy its picture from the shop and add it here — it stays separate from what you own.'
+        : 'Tag pieces from your outfit photos, or add one from a picture.' }),
+      (() => {
+        const b = el('button', { class: 'btn btn-hero' }, icon('plus'),
+          filter.wish ? 'Add a wanted item' : 'Add an item');
+        b.addEventListener('click', () => openAddItem({ wish: filter.wish }));
+        return b;
+      })()));
+    return;
+  }
+
+  // Builder + plans + insights describe clothes you actually own.
+  if (!filter.wish) {
+    const buildBtn = el('button', { class: 'wardrobe-cta' },
+      el('span', { class: 'grow' },
+        el('b', { text: 'Build an outfit' }),
+        el('span', { text: canSuggest()
+          ? 'Shuffle your own clothes into something to wear'
+          : 'Tag a top and a bottom to unlock suggestions' })),
+      icon('shuffle'));
+    buildBtn.disabled = !canSuggest();
+    buildBtn.addEventListener('click', () => openOutfitBuilder());
+    container.append(buildBtn);
+
+    const plansBox = plansCard(container);
+    if (plansBox) container.append(plansBox);
+  }
 
   container.append(filterBar(() => renderGrid(grid)));
   const grid = el('div', { class: 'item-grid' });
   container.append(grid);
   renderGrid(grid);
 
-  const ins = insightsCard();
-  if (ins) container.append(ins);
+  if (!filter.wish) {
+    const ins = insightsCard();
+    if (ins) container.append(ins);
+  } else {
+    const total = items.reduce((s, i) => s + (Number.isFinite(i.price) ? i.price : 0), 0);
+    if (total > 0) {
+      container.append(el('div', { class: 'card' },
+        el('div', { class: 'stat-card-title', text: 'Wishlist total' }),
+        el('div', { class: 'tile-value', text: formatPrice(total, store.settings.currency || 'USD') }),
+        el('div', { class: 'tile-label', text: `${items.length} wanted item${items.length === 1 ? '' : 's'}` })));
+    }
+  }
 }
 
 /* ---------- filters ---------- */
@@ -82,7 +132,7 @@ function filterBar(onChange) {
       el('option', { value: k, text: s.label, selected: filter.sort === k || null })));
   sortSel.addEventListener('change', () => { filter.sort = sortSel.value; onChange(); });
 
-  const used = new Set(store.items().map((i) => i.category));
+  const used = new Set(store.items(filter.wish).map((i) => i.category));
   const chips = el('div', { class: 'chip-row' },
     el('label', { class: 'chip active' }, icon('chart'), sortSel),
     CATEGORIES.filter((c) => used.has(c.id)).map((c) => {
@@ -104,12 +154,13 @@ function filterBar(onChange) {
 
 function renderGrid(grid) {
   const q = filter.q.trim().toLowerCase();
-  const rows = store.items()
+  const rows = store.items(filter.wish)
     .map((item) => ({ item, ...itemStats(item) }))
     .filter(({ item }) => {
       if (filter.cat && item.category !== filter.cat) return false;
       if (!q) return true;
-      return `${item.name} ${item.brand || ''} ${item.color || ''}`.toLowerCase().includes(q);
+      const hay = `${item.name} ${item.brand || ''} ${item.color || ''} ${(item.tags || []).join(' ')}`;
+      return hay.toLowerCase().includes(q);
     })
     .sort(SORTS[filter.sort].fn);
 
@@ -129,14 +180,16 @@ function itemCard({ item, wears, costPerWear }) {
   const cpw = costPerWear != null ? `${formatPrice(costPerWear, item.currency)}/wear` : null;
 
   const card = el('button', { class: 'item-card', 'aria-label': item.name },
-    el('div', { class: 'item-thumb-wrap' }, img,
-      el('span', { class: 'item-cat', text: catEmoji(item.category) })),
+    el('div', { class: 'item-thumb-wrap' },
+      img,
+      el('span', { class: 'item-cat', text: catEmoji(item.category) }),
+      item.wish ? el('span', { class: 'item-wish', title: 'On your wishlist' }, icon('heart')) : null),
     el('div', { class: 'item-meta' },
       el('b', { class: 'item-name', text: item.name }),
       el('span', { class: 'item-sub', text: item.brand || catLabel(item.category) }),
-      el('span', { class: 'item-stat' },
-        `${wears} wear${wears === 1 ? '' : 's'}`,
-        cpw ? ` · ${cpw}` : price ? ` · ${price}` : '')));
+      el('span', { class: 'item-stat' }, item.wish
+        ? (price || 'wanted')
+        : `${wears} wear${wears === 1 ? '' : 's'}${cpw ? ` · ${cpw}` : price ? ` · ${price}` : ''}`)));
   card.addEventListener('click', () => openItemDetail(item.id));
   return card;
 }
@@ -224,10 +277,10 @@ export function openItemDetail(id) {
       close();
     });
 
-    /* stats tiles */
+    /* stats tiles — wear history is meaningless for something you don't own */
     const tiles = el('div', { class: 'tile-grid' },
-      tile(String(stats.wears), 'Times worn'),
-      tile(stats.lastWorn ? relDay(stats.lastWorn) : '—', 'Last worn'),
+      item.wish ? null : tile(String(stats.wears), 'Times worn'),
+      item.wish ? null : tile(stats.lastWorn ? relDay(stats.lastWorn) : '—', 'Last worn'),
       Number.isFinite(item.price)
         ? tile(formatPrice(item.price, item.currency), 'Price')
         : null,
@@ -249,6 +302,24 @@ export function openItemDetail(id) {
         item.buy ? 'Where to buy (saved)' : 'Find where to buy');
       buyRow.addEventListener('click', () => openWhereToBuy(item.id));
     }
+
+    /* Wishlist ⇄ wardrobe */
+    const moveRow = el('button', { class: `btn btn-block${item.wish ? ' btn-hero' : ''}` },
+      icon(item.wish ? 'check' : 'heart'),
+      item.wish ? 'I bought this — move to wardrobe' : 'Move to wishlist');
+    moveRow.addEventListener('click', async () => {
+      await store.setWish(item.id, !item.wish);
+      toast(item.wish ? `“${item.name}” moved to your wardrobe ✓` : `“${item.name}” moved to your wishlist`);
+      render();
+    });
+
+    /* Tags + notes */
+    const tagsBox = (item.tags || []).length
+      ? el('div', { class: 'sim-chips' }, item.tags.map((t) => el('span', { class: 'sim-chip', text: t })))
+      : null;
+    const notesBox = item.notes
+      ? el('p', { class: 'item-notes', text: item.notes })
+      : null;
 
     /* pairs well with */
     const pairs = pairsWith(item.id);
@@ -293,9 +364,12 @@ export function openItemDetail(id) {
       el('div', { class: 'item-detail' },
         el('div', { class: 'item-hero-wrap' }, img,
           swatch ? el('i', { class: 'item-hero-dot', style: { background: swatch } }) : null),
+        tagsBox,
+        notesBox,
         tiles,
         linkRow,
         buyRow,
+        moveRow,
         pairsBox,
         outfitBox));
   }
@@ -327,6 +401,8 @@ function plansCard(container) {
     wear.addEventListener('click', () => {
       import('./capture.js').then(({ openCapture }) => openCapture({ items: plan.items }));
     });
+    const share = el('button', { class: 'icon-btn', 'aria-label': 'Share this outfit' }, icon('share'));
+    share.addEventListener('click', () => shareOutfit(items, 'Outfit idea'));
     const del = el('button', { class: 'icon-btn', 'aria-label': 'Delete plan' }, icon('x'));
     del.addEventListener('click', async () => {
       await store.deletePlan(plan.id);
@@ -337,7 +413,7 @@ function plansCard(container) {
       el('span', { class: 'grow' },
         el('b', { text: items.map((i) => i.name).join(' + ') }),
         el('span', { class: 'sub', text: `saved ${new Date(plan.createdAt).toLocaleDateString()}` })),
-      el('span', { class: 'plan-actions' }, wear, del));
+      el('span', { class: 'plan-actions' }, share, wear, del));
   }).filter(Boolean);
 
   if (!rows.length) return null;
