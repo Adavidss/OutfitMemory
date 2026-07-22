@@ -852,6 +852,8 @@
   color: var(--ink);
 }
 .key-field input:focus { border-color: var(--accent); }
+.key-actions { display: flex; gap: 6px; flex: none; }
+.key-actions .btn { white-space: nowrap; }
 
 .theme-grid {
   display: grid;

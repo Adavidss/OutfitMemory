@@ -14,6 +14,7 @@ import {
   backupSupported, backupNow, pickBackupFolder, getBackupHandle,
   forgetBackupFolder, PRESET_LABELS,
 } from '../backup.js';
+import { looksLikeGeminiKey, verifyKey } from '../search/whereToBuy.js';
 
 const THEMES = [
   { id: 'auto', name: 'Auto', colors: ['#ffffff', '#0b0b0f', '#6a5ae0'] },
@@ -334,19 +335,39 @@ function onlineSearchGroup(container) {
   const keyInput = el('input', {
     type: 'password',
     value: store.settings.geminiKey || '',
-    placeholder: 'Paste your Gemini API key (AIza…)',
+    placeholder: 'Paste your Gemini API key',
     'aria-label': 'Gemini API key',
     autocomplete: 'off',
+    spellcheck: 'false',
   });
   const saveBtn = el('button', { class: 'btn btn-sm btn-primary', text: hasKey ? 'Update' : 'Enable' });
   saveBtn.addEventListener('click', async () => {
     const k = keyInput.value.trim();
-    if (k && !/^AIza[0-9A-Za-z_-]{20,}$/.test(k)) {
-      return toast('That doesn\'t look like a Gemini API key (they start with "AIza").');
+    // Format is NOT prefix-checked: Google ships more than one key shape
+    // and guessing rejects valid keys. "Test key" is the real validator.
+    if (k && !looksLikeGeminiKey(k)) {
+      return toast('That doesn\'t look like an API key — check for stray spaces.');
     }
     store.saveSettings({ geminiKey: k });
-    toast(k ? 'Online item search enabled' : 'Online item search disabled');
+    toast(k ? 'Key saved — tap “Test key” to check it' : 'Online item search disabled');
     renderSettings(container);
+  });
+
+  const testBtn = el('button', { class: 'btn btn-sm', text: 'Test key' });
+  testBtn.addEventListener('click', async () => {
+    const k = keyInput.value.trim() || (store.settings.geminiKey || '');
+    if (!k) return toast('Paste a key first');
+    testBtn.disabled = true;
+    testBtn.textContent = 'Testing…';
+    try {
+      const { model } = await verifyKey(k);
+      toast(`Key works ✓ (${model})`);
+    } catch (err) {
+      toast(err?.message || 'Test failed');
+    } finally {
+      testBtn.disabled = false;
+      testBtn.textContent = 'Test key';
+    }
   });
 
   card.append(el('div', { class: 'set-row' }, icon('search'),
@@ -356,7 +377,8 @@ function onlineSearchGroup(container) {
         ? 'Enabled — items get a "Find where to buy" button.'
         : 'Off. Bring your own free Google AI Studio key to enable it.' }))));
   card.append(el('div', { class: 'set-row' },
-    el('span', { class: 'grow key-field' }, keyInput), saveBtn));
+    el('span', { class: 'grow key-field' }, keyInput),
+    el('span', { class: 'key-actions' }, testBtn, saveBtn)));
   if (hasKey) {
     card.append(rowButton('x', 'Disable and forget the key', '', () => {
       store.saveSettings({ geminiKey: '' });
