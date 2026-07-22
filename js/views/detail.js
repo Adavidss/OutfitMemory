@@ -11,7 +11,6 @@ import { fmtLong, relDay } from '../util/dates.js';
 import { buildMemoryCard } from '../shareCard.js';
 import { openItemTagger } from './itemTagger.js';
 import { openItemDetail } from './wardrobeView.js';
-import { openSimilarItems } from './similarItems.js';
 
 export function openDetail(id, contextIds) {
   const ids = contextIds?.length ? [...contextIds] : store.entries().map((e) => e.id);
@@ -90,10 +89,6 @@ export function openDetail(id, contextIds) {
       icon('hanger'), worn.length ? 'Edit clothing' : 'Tag clothing');
     tagBtn.addEventListener('click', () => openItemTagger(entry.id));
 
-    const findBtn = el('button', { class: 'btn btn-sm lb-find-btn' },
-      icon('search'), entry.shopping ? 'Shopping matches' : 'Find similar items');
-    findBtn.addEventListener('click', () => openSimilarItems(entry.id));
-
     const itemRow = el('div', { class: 'lb-items' },
       worn.map((item) => {
         const thumb = el('img', { alt: '' });
@@ -102,8 +97,37 @@ export function openDetail(id, contextIds) {
         chip.addEventListener('click', () => openItemDetail(item.id));
         return chip;
       }),
-      tagBtn,
-      findBtn);
+      tagBtn);
+
+    /* "More like this" — outfits sharing clothing items or colors.
+       Pure local scoring: shared item ×3, shared color name ×1. */
+    const similar = store.entries()
+      .filter((x) => x.id !== entry.id)
+      .map((x) => {
+        const sharedItems = (x.items || []).filter((i) => (entry.items || []).includes(i)).length;
+        const sharedColors = (x.colors || []).filter((c) => (entry.colors || []).includes(c)).length;
+        return { x, score: sharedItems * 3 + sharedColors };
+      })
+      .filter((s) => s.score >= (entry.items?.length ? 3 : 2))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 8);
+
+    const likeThis = similar.length
+      ? el('div', { class: 'lb-similar' },
+          el('div', { class: 'stat-card-title', text: 'More like this' }),
+          el('div', { class: 'lb-similar-row' }, similar.map(({ x }) => {
+            const t = el('img', { alt: `Outfit from ${fmtLong(x.date)}`, loading: 'lazy' });
+            store.thumbURL(x).then((u) => { if (u) t.src = u; });
+            const b = el('button', { class: 'lb-similar-card', title: fmtLong(x.date) }, t,
+              el('span', { text: x.date.slice(5) }));
+            b.addEventListener('click', () => {
+              const j = ids.indexOf(x.id);
+              if (j >= 0) { idx = j; render(); }
+              else { close(); openDetail(x.id); }
+            });
+            return b;
+          })))
+      : null;
 
     const shareBtn = el('button', { class: 'icon-btn', 'aria-label': 'Share' }, icon('share'));
     shareBtn.addEventListener('click', () =>
@@ -159,7 +183,8 @@ export function openDetail(id, contextIds) {
         notes,
         tags,
         tagList,
-        meta));
+        meta,
+        likeThis));
   }
 
   function nav(delta) {

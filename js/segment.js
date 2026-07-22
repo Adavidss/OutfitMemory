@@ -22,6 +22,7 @@
  */
 
 import { summarizeColors, rawSample, _setGarmentSampler } from './colors.js';
+import { parsePerson, garmentPixels, CLASS } from './models/personParser.js';
 
 const WORK_EDGE = 240;      // long edge of the analysis copy
 const MIN_COVERAGE = 0.10;  // fraction of the drawn box the region must fill
@@ -362,3 +363,130 @@ export function garmentColors(sourceCanvas, inset = true) {
 // Let colors.js delegate to the segmentation-aware sampler without a
 // circular static import.
 _setGarmentSampler(garmentColors);
+
+/* ================= model-backed paths (preferred) ================= */
+
+/**
+ * smartColors(canvas) — outfit colors from ACTUAL clothing pixels, using
+ * the MediaPipe person parser. Falls back to the heuristic garmentColors()
+ * when the parser isn't available or finds no clothes (photo of a flat-lay,
+ * cartoon, etc.). This is the fix for skin and hair polluting palettes:
+ * the model labels those pixel classes explicitly and we simply never
+ * sample them.
+ */
+export async function smartColors(sourceCanvas) {
+  try {
+    const got = await garmentPixels(sourceCanvas, sourceCanvas.width, sourceCanvas.height);
+    // Under 2% clothing pixels means the parser didn't find a dressed
+    // person — trust the heuristic instead of an empty read.
+    if (got && got.clothesShare > 0.02 && got.samples.length >= 40) {
+      return summarizeColors(got.samples);
+    }
+  } catch { /* fall through */ }
+  return garmentColors(sourceCanvas, true);
+}
+
+/**
+ * smartSegment(source, nw, nh, rect) — like segmentGarment(), but the
+ * garment mask comes from the person parser: clothing+accessory pixels
+ * intersected with (a padded version of) the user's box, tightened to the
+ * connected region they actually pointed at. Hair, skin and background are
+ * excluded by classification, not by color rules.
+ *
+ * Returns the same shape as segmentGarment(); falls back to it entirely
+ * when the parser is unavailable.
+ */
+export async function smartSegment(source, nw, nh, rect) {
+  let parsed = null;
+  try {
+    parsed = await parsePerson(source, nw, nh, 384);
+  } catch { /* no parser */ }
+  if (!parsed) return segmentGarment(source, nw, nh, rect);
+
+  const { classes, w, h } = parsed;
+  const sx = w / nw, sy = h / nh;
+
+  // Padded box in mask coordinates (same growth allowance as the fallback).
+  const padX = Math.max(rect.w * 0.15, nw * 0.12);
+  const padY = Math.max(rect.h * 0.15, nh * 0.12);
+  const bx0 = Math.max(0, Math.floor((rect.x - padX) * sx));
+  const by0 = Math.max(0, Math.floor((rect.y - padY) * sy));
+  const bx1 = Math.min(w - 1, Math.ceil((rect.x + rect.w + padX) * sx));
+  const by1 = Math.min(h - 1, Math.ceil((rect.y + rect.h + padY) * sy));
+
+  const wearable = (p) => classes[p] === CLASS.CLOTHES || classes[p] === CLASS.OTHERS;
+
+  // Flood-fill the wearable region connected to the box centre, so tapping
+  // the shirt doesn't also grab the trousers (separate garment, separate
+  // connected component — they touch, so also stop at a horizontal gap
+  // where the user's box ends... in practice the box bounds the fill).
+  const mask = new Uint8Array(w * h);
+  const queue = [];
+  const cx0 = Math.round((rect.x + rect.w * 0.3) * sx);
+  const cx1 = Math.round((rect.x + rect.w * 0.7) * sx);
+  const cy0 = Math.round((rect.y + rect.h * 0.3) * sy);
+  const cy1 = Math.round((rect.y + rect.h * 0.7) * sy);
+  for (let y = Math.max(by0, cy0); y <= Math.min(by1, cy1); y++) {
+    for (let x = Math.max(bx0, cx0); x <= Math.min(bx1, cx1); x++) {
+      const p = y * w + x;
+      if (wearable(p) && !mask[p]) { mask[p] = 1; queue.push(p); }
+    }
+  }
+  for (let qi = 0; qi < queue.length; qi++) {
+    const p = queue[qi];
+    const px = p % w, py = (p / w) | 0;
+    for (let d = 0; d < 4; d++) {
+      const nx = px + (d === 0 ? 1 : d === 1 ? -1 : 0);
+      const ny = py + (d === 2 ? 1 : d === 3 ? -1 : 0);
+      if (nx < bx0 || nx > bx1 || ny < by0 || ny > by1) continue;
+      const np = ny * w + nx;
+      if (mask[np] || !wearable(np)) continue;
+      mask[np] = 1;
+      queue.push(np);
+    }
+  }
+
+  const drawnArea = Math.max(1, Math.round(rect.w * sx) * Math.round(rect.h * sy));
+  if (queue.length / drawnArea < 0.08) {
+    // The parser found nearly no clothing where the user pointed —
+    // heuristics may still manage (e.g. product shots with no person).
+    return segmentGarment(source, nw, nh, rect);
+  }
+
+  // Tight bbox + garment-only color samples from the photo itself.
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const g = canvas.getContext('2d', { willReadFrequently: true });
+  g.drawImage(source, 0, 0, w, h);
+  const px = g.getImageData(0, 0, w, h).data;
+
+  let mnx = w, mny = h, mxx = 0, mxy = 0;
+  const samples = [];
+  for (let y = by0; y <= by1; y++) {
+    for (let x = bx0; x <= bx1; x++) {
+      const p = y * w + x;
+      if (!mask[p]) continue;
+      if (x < mnx) mnx = x;
+      if (x > mxx) mxx = x;
+      if (y < mny) mny = y;
+      if (y > mxy) mxy = y;
+      const i = p * 4;
+      samples.push([px[i], px[i + 1], px[i + 2], 1]);
+    }
+  }
+
+  return {
+    ok: true,
+    engine: 'parser',
+    coverage: queue.length / drawnArea,
+    bbox: {
+      x: Math.round(mnx / sx),
+      y: Math.round(mny / sy),
+      w: Math.max(8, Math.round((mxx - mnx + 1) / sx)),
+      h: Math.max(8, Math.round((mxy - mny + 1) / sy)),
+    },
+    ...summarizeColors(samples),
+    mask, maskW: w, maskH: h,
+    maskBox: { x0: bx0, y0: by0, x1: bx1, y1: by1 },
+  };
+}

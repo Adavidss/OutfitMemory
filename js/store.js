@@ -33,7 +33,7 @@ import { BrowserStorage } from './storage/browserStorage.js';
 import { todayStr, nowTime, computeStreaks } from './util/dates.js';
 import { zipFiles, readZip } from './util/zip.js';
 import { idbDel } from './util/idb.js';
-import { deriveFromExisting } from './imagePipeline.js';
+import { deriveFromExisting, recolorExisting } from './imagePipeline.js';
 
 const SETTINGS_KEY = 'om.settings';
 const META_CACHE_KEY = 'om.metaCache';
@@ -46,6 +46,8 @@ const DEFAULT_SETTINGS = {
   memoryDismissed: '',    // date the "on this day" banner was dismissed
   gridDensity: 'cozy',    // 'cozy' | 'compact' gallery grid
   backup: { preset: 'off', lastRun: '', folderName: '' }, // see js/backup.js
+  autoIdentify: false,    // classify crops while tagging even if not cached yet
+  geminiKey: '',          // user's own key for optional online lookup (never exported)
 };
 
 const SCHEMA = 2;
@@ -136,6 +138,7 @@ class Store extends EventTarget {
   #normalize() {
     if (!Array.isArray(this.meta.entries)) this.meta.entries = [];
     if (!Array.isArray(this.meta.items)) this.meta.items = [];
+    if (!Array.isArray(this.meta.plans)) this.meta.plans = [];
     this.meta.schema = Math.max(SCHEMA, Number(this.meta.schema) || 0);
   }
 
@@ -404,6 +407,71 @@ class Store extends EventTarget {
 
   itemThumbURL(item) {
     return item?.thumb ? this.#url(item.thumb) : Promise.resolve(null);
+  }
+
+  /* ================= planned outfits ================= */
+
+  /** Saved outfit ideas from the builder (no photo yet), newest first. */
+  plans() {
+    return [...(this.meta?.plans || [])].sort((a, b) =>
+      (b.createdAt || '').localeCompare(a.createdAt || ''));
+  }
+
+  async addPlan(itemIds, note = '') {
+    const plan = {
+      id: `plan_${Date.now().toString(36)}`,
+      items: [...new Set(itemIds)].filter((id) => this.itemById(id)),
+      note: note.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    if (!plan.items.length) return null;
+    this.meta.plans.push(plan);
+    await this.#saveMeta();
+    this.emit();
+    return plan;
+  }
+
+  async deletePlan(id) {
+    this.meta.plans = (this.meta.plans || []).filter((p) => p.id !== id);
+    await this.#saveMeta();
+    this.emit();
+  }
+
+  /* ================= color maintenance ================= */
+
+  /**
+   * Re-run color detection over every outfit and item crop. Exists because
+   * detection improves over time (person-parsing replaced heuristics) and
+   * old palettes keep whatever the old engine saw — skin included.
+   */
+  async recalcAllColors(onProgress) {
+    const entries = this.meta.entries;
+    let done = 0, changed = 0;
+    for (const e of entries) {
+      done++;
+      onProgress?.(done, entries.length + this.meta.items.length);
+      const blob = await this.adapter.readFile(e.thumbnail) || await this.adapter.readFile(e.image);
+      if (!blob) continue;
+      try {
+        const c = await recolorExisting(blob);
+        if (c.colors.length && JSON.stringify(c.colors) !== JSON.stringify(e.colors)) changed++;
+        if (c.colors.length) { e.colors = c.colors; e.palette = c.palette; }
+      } catch { /* keep old colors for unreadable files */ }
+    }
+    for (const it of this.meta.items) {
+      done++;
+      onProgress?.(done, entries.length + this.meta.items.length);
+      if (!it.thumb) continue;
+      const blob = await this.adapter.readFile(it.thumb);
+      if (!blob) continue;
+      try {
+        const c = await recolorExisting(blob);
+        if (c.colors[0]) { it.color = c.colors[0]; it.hex = c.palette[0]?.hex || it.hex; }
+      } catch { /* ignore */ }
+    }
+    await this.#saveMeta();
+    this.emit();
+    return { changed, total: entries.length };
   }
 
   /** All distinct tags, most-used first (for autocomplete). */

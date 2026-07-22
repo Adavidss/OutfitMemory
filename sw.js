@@ -7,7 +7,7 @@
  * touch the network at all.
  */
 
-const CACHE = 'outfitmemory-v7';
+const CACHE = 'outfitmemory-v8';
 
 // On localhost, serve network-first so local development always sees fresh
 // files (cache still works as an offline fallback). Production stays
@@ -48,10 +48,10 @@ const ASSETS = [
   './js/views/outfitBuilder.js',
   './js/wardrobe.js',
   './js/segment.js',
-  './js/views/similarItems.js',
   './js/models/fashionModel.js',
+  './js/models/personParser.js',
+  './js/search/whereToBuy.js',
   './js/workers/inferenceWorker.js',
-  './js/search/queryBuilder.js',
   './js/search/shoppingSearch.js',
   './js/cache/modelCache.js',
   './js/utils/clothingParser.js',

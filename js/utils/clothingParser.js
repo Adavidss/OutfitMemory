@@ -155,6 +155,15 @@ export function axesFor(slot) {
   return AXES.filter((a) => !a.appliesTo || a.appliesTo.includes(slot));
 }
 
+/** Union of every garment label, with the wardrobe slot each belongs to. */
+export function allGarments() {
+  const out = [];
+  for (const [slot, labels] of Object.entries(GARMENTS)) {
+    for (const label of labels) out.push({ label, slot });
+  }
+  return out;
+}
+
 /** Labels for an axis in the context of a slot. */
 export function labelsForAxis(axis, slot) {
   return axis.labels || axis.labelsFor(slot);

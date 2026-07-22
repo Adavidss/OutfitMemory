@@ -6,15 +6,20 @@
   <!--
     Privacy by policy, enforced by the browser.
 
-    `default-src 'self'` still blocks everything by default. Exactly three
-    off-origin exceptions exist, and all three are DOWNLOADS of the
-    on-device clothing model:
-      • cdn.jsdelivr.net — the transformers.js runtime (script + wasm)
-      • huggingface.co / *.hf.co — the FashionCLIP weights
+    `default-src 'self'` blocks everything by default. The exceptions:
 
-    There is no `form-action` target and no other connect-src host, so
-    photos, embeddings and search phrases have nowhere to be uploaded to.
-    Inference happens locally; weights are cached for offline use.
+    DOWNLOAD-ONLY (fetch models/runtimes, nothing is sent):
+      • cdn.jsdelivr.net — transformers.js + MediaPipe runtimes (script/wasm)
+      • huggingface.co / *.hf.co — FashionCLIP weights
+      • storage.googleapis.com — MediaPipe person-parsing model
+
+    UPLOAD-CAPABLE, OPT-IN (exists for exactly one feature):
+      • generativelanguage.googleapis.com — "Find where to buy". Inert until
+        the user pastes their own Gemini API key in Settings; only then can
+        an ITEM CROP be sent, and only when they tap the button.
+
+    There is still no form-action target. Skip the optional features and the
+    app makes no network requests at all.
   -->
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self';
@@ -22,7 +27,7 @@
                  media-src blob:;
                  style-src 'self';
                  script-src 'self' 'wasm-unsafe-eval' https://cdn.jsdelivr.net;
-                 connect-src 'self' blob: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co;
+                 connect-src 'self' blob: data: https://cdn.jsdelivr.net https://huggingface.co https://*.hf.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co https://storage.googleapis.com https://generativelanguage.googleapis.com;
                  worker-src 'self' blob:;
                  child-src 'self' blob:;
                  manifest-src 'self';

@@ -32,6 +32,7 @@ export function renderSettings(container) {
   container.append(storageGroup(container));
   container.append(backupGroup(container));
   container.append(modelGroup(container));
+  container.append(onlineSearchGroup(container));
   container.append(aboutGroup());
   container.append(dangerGroup());
 }
@@ -105,6 +106,16 @@ function storageGroup(container) {
     card.append(rowButton('folder', 'Change folder…',
       'Point OutfitMemory at a different archive folder.', () => changeFolder(container)));
   }
+
+  // Both storage modes: refresh palettes with the current detection engine.
+  // Old entries keep whatever the engine saw at save time — including the
+  // skin/hair pollution the parser upgrade fixed — until re-read.
+  card.append(rowButton('palette', 'Recalculate colors',
+    'Re-reads every outfit and item with the improved clothes-only detection.', async () => {
+      const pt = progressToast('Recalculating colors…');
+      const { changed, total } = await store.recalcAllColors((i, n) => pt.update(`Recalculating ${i}/${n}…`));
+      pt.done(`Colors refreshed — ${changed} of ${total} outfits changed`);
+    }));
 
   return group('Storage', card,
     'Nothing ever leaves your device. There is no server, no account and no analytics — the app cannot phone home (enforced by its Content-Security-Policy).');
@@ -295,8 +306,67 @@ function modelGroup(container) {
     }
   })();
 
+  // Auto-identify toggle: classification names new items ("Sweater — 84%")
+  // while tagging. Off by default so tagging never triggers a surprise
+  // download; it turns itself on implicitly once the model is cached.
+  const idRow = el('button', { class: 'set-row tappable' }, icon('sparkles'),
+    el('span', { class: 'grow' }, 'Identify items while tagging',
+      el('span', { class: 'sub', text: store.settings.autoIdentify
+        ? 'On — new items get a name and confidence from the model'
+        : 'Off — turns on automatically once the model is downloaded' })),
+    el('span', { text: store.settings.autoIdentify ? 'On' : 'Auto' }));
+  idRow.addEventListener('click', () => {
+    store.saveSettings({ autoIdentify: !store.settings.autoIdentify });
+    renderSettings(container);
+  });
+  card.append(idRow);
+
   return group('On-device AI', card,
-    'Find similar items runs a clothing model locally in your browser. The model is downloaded once from a public CDN and cached; your photos are never uploaded.');
+    'Tagging can identify each piece with a clothing model that runs locally in your browser (downloaded once, cached, offline afterwards). Your photos are never uploaded by this feature.');
+}
+
+/* ---------- online item search (user's own Gemini key) ---------- */
+
+function onlineSearchGroup(container) {
+  const card = el('div', { class: 'set-card' });
+  const hasKey = !!(store.settings.geminiKey || '').trim();
+
+  const keyInput = el('input', {
+    type: 'password',
+    value: store.settings.geminiKey || '',
+    placeholder: 'Paste your Gemini API key (AIza…)',
+    'aria-label': 'Gemini API key',
+    autocomplete: 'off',
+  });
+  const saveBtn = el('button', { class: 'btn btn-sm btn-primary', text: hasKey ? 'Update' : 'Enable' });
+  saveBtn.addEventListener('click', async () => {
+    const k = keyInput.value.trim();
+    if (k && !/^AIza[0-9A-Za-z_-]{20,}$/.test(k)) {
+      return toast('That doesn\'t look like a Gemini API key (they start with "AIza").');
+    }
+    store.saveSettings({ geminiKey: k });
+    toast(k ? 'Online item search enabled' : 'Online item search disabled');
+    renderSettings(container);
+  });
+
+  card.append(el('div', { class: 'set-row' }, icon('search'),
+    el('span', { class: 'grow' },
+      'Find where to buy',
+      el('span', { class: 'sub', text: hasKey
+        ? 'Enabled — items get a "Find where to buy" button.'
+        : 'Off. Bring your own free Google AI Studio key to enable it.' }))));
+  card.append(el('div', { class: 'set-row' },
+    el('span', { class: 'grow key-field' }, keyInput), saveBtn));
+  if (hasKey) {
+    card.append(rowButton('x', 'Disable and forget the key', '', () => {
+      store.saveSettings({ geminiKey: '' });
+      toast('Key removed');
+      renderSettings(container);
+    }, true));
+  }
+
+  return group('Online item search (optional)', card,
+    'Off by default. When enabled, tapping "Find where to buy" sends THAT ITEM\'S CROP — never the full outfit photo — to Google\'s Gemini API using your own key, and real web sources come back via Google Search. The key is stored only on this device and is never part of exports or backups. Get a free key at aistudio.google.com.');
 }
 
 /* ---------- about ---------- */

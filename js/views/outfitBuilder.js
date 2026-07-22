@@ -28,6 +28,7 @@ export function openOutfitBuilder() {
   const slotsBox = el('div', { class: 'builder-slots' });
   const shuffleBtn = el('button', { class: 'btn btn-hero btn-block' }, icon('shuffle'), 'Shuffle');
   const wearBtn = el('button', { class: 'btn btn-block' }, icon('camera'), 'Wear this today');
+  const saveBtn = el('button', { class: 'btn btn-block' }, icon('heart'), 'Save as idea');
   const closeBtn = el('button', { class: 'icon-btn', 'aria-label': 'Close' }, icon('x'));
 
   const root = el('div', { class: 'builder' },
@@ -38,7 +39,8 @@ export function openOutfitBuilder() {
         el('span', { text: 'Tap a piece to swap · lock what you like' })),
       el('span', { class: 'icon-btn-spacer' })),
     slotsBox,
-    el('div', { class: 'builder-actions' }, shuffleBtn, wearBtn));
+    el('div', { class: 'builder-actions' }, shuffleBtn,
+      el('div', { class: 'builder-secondary' }, saveBtn, wearBtn)));
 
   const { close } = openOverlay(root, { variant: 'full' });
   closeBtn.addEventListener('click', close);
@@ -145,6 +147,19 @@ export function openOutfitBuilder() {
     if (!ids.length) return toast('Shuffle up an outfit first ✨');
     close();
     openCapture({ items: ids });
+  });
+
+  // "Creator" half of the loop: keep a combination for later without
+  // needing a photo right now. Plans live in metadata (meta.plans) and
+  // show up on the Wardrobe tab with one-tap "wear it".
+  saveBtn.addEventListener('click', async () => {
+    const ids = Object.values(picks).filter(Boolean).map((i) => i.id);
+    if (ids.length < 2) return toast('Shuffle up an outfit first ✨');
+    const plan = await store.addPlan(ids);
+    if (plan) {
+      haptic();
+      toast('Saved to planned outfits ✓');
+    }
   });
 
   shuffle();

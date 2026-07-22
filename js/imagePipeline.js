@@ -14,9 +14,9 @@
  */
 
 import { extractColors } from './colors.js';
-// Side-effect import: registers the skin/background-aware sampler that
-// extractColors delegates to, so faces and walls stay out of palettes.
-import './segment.js';
+// smartColors samples ONLY model-labelled clothing pixels (MediaPipe person
+// parsing) and falls back to heuristics when the parser isn't available.
+import { smartColors } from './segment.js';
 
 const LONG_EDGES = [1600, 1400, 1200]; // fall back smaller if size budget missed
 const QUALITIES = [0.86, 0.8, 0.72, 0.64, 0.58];
@@ -135,7 +135,7 @@ export async function processPhoto(file) {
 
     const thumbCanvas = drawScaled(canvas, canvas.width, canvas.height, THUMB_EDGE);
     const thumbBlob = await toBlob(thumbCanvas, mime, THUMB_QUALITY);
-    const colorInfo = extractColors(thumbCanvas);
+    const colorInfo = await smartColors(thumbCanvas);
 
     return {
       blob,
@@ -185,8 +185,23 @@ export async function deriveFromExisting(blob) {
   try {
     const thumbCanvas = drawScaled(s.src, s.w, s.h, THUMB_EDGE);
     const thumbBlob = await toBlob(thumbCanvas, mime, THUMB_QUALITY);
-    const colorInfo = extractColors(thumbCanvas);
+    const colorInfo = await smartColors(thumbCanvas);
     return { thumbBlob, thumbExt: ext, width: s.w, height: s.h, ...colorInfo };
+  } finally {
+    s.release();
+  }
+}
+
+/**
+ * Re-read colors for an existing archive photo (no re-encode, no new
+ * thumbnail). Used by "Recalculate colors" after the detection engine
+ * improves — old entries keep skin-polluted palettes until refreshed.
+ */
+export async function recolorExisting(blob) {
+  const s = await decodeSource(blob);
+  try {
+    const canvas = drawScaled(s.src, s.w, s.h, THUMB_EDGE);
+    return await smartColors(canvas);
   } finally {
     s.release();
   }

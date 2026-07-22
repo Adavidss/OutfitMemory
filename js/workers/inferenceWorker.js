@@ -18,9 +18,7 @@
  * first use; no image, embedding or query is ever uploaded anywhere.
  */
 
-import {
-  allPrompts, axesFor, labelsForAxis, vocabVersion, buildAttributes,
-} from '../utils/clothingParser.js';
+import { allPrompts, vocabVersion, allGarments } from '../utils/clothingParser.js';
 
 /* ---------- transformers.js (loaded lazily from CDN, then cached) ---------- */
 
@@ -292,76 +290,70 @@ function softmax(sims, scale = 100) {
   return exp.map((e) => e / sum);
 }
 
-/** Score one image embedding against every axis for a slot. */
-function scoreAxes(imageVec, slot) {
-  const out = {};
-  for (const axis of axesFor(slot)) {
-    const labels = labelsForAxis(axis, slot);
-    const sims = labels.map((l) => {
-      const v = textVectors.get(axis.prompt(l));
-      return v ? dot(imageVec, v) : -1;
-    });
-    const probs = softmax(sims);
-    out[axis.key] = labels
-      .map((label, i) => ({ label, confidence: probs[i], similarity: sims[i] }))
-      .sort((a, b) => b.confidence - a.confidence)
-      .slice(0, 4);
+/* ---------- message handling ---------- */
+
+/** Walk the registry until a model loads (automatic fallback). */
+async function ensureLoaded(registry, devicePref) {
+  const device = await pickDevice(devicePref);
+  if (visionModel && activeModel) return { device, loaded: activeModel, failures: [] };
+  progress('device', device === 'webgpu' ? 'Initializing WebGPU…' : 'Initializing WASM runtime…');
+  const failures = [];
+  for (const entry of registry) {
+    try {
+      const loaded = await loadModel(entry, device);
+      await ensureTextVectors(loaded, device);
+      return { device, loaded, failures };
+    } catch (err) {
+      failures.push(`${entry.id}: ${err?.message || err}`);
+      visionModel = null;
+      tokenizer = null;
+      processor = null;
+    }
   }
-  return out;
+  throw new Error(`No clothing model could be loaded. ${failures.join(' | ')}`);
 }
 
-/* ---------- message handling ---------- */
+/**
+ * Identify one garment crop: score against the UNION of every slot's
+ * garment vocabulary so the answer also tells us the wardrobe category.
+ * Returns the single most probable label with its probability.
+ */
+function classifyGarment(imageVec, slotHint) {
+  const garments = allGarments();
+  const sims = garments.map((g) => {
+    const v = textVectors.get(`a photo of a ${g.label}`);
+    return v ? dot(imageVec, v) : -1;
+  });
+  const probs = softmax(sims);
+  const ranked = garments
+    .map((g, i) => ({ garment: g.label, category: g.slot, confidence: probs[i] }))
+    .sort((a, b) => b.confidence - a.confidence);
+
+  const top = ranked[0];
+  // Nudge ties toward where on the body the user tagged: if the runner-up
+  // matches the position hint and is within a whisker, prefer it.
+  const alt = ranked.find((r) => r.category === slotHint);
+  const pick = alt && alt !== top && top.confidence - alt.confidence < 0.06 ? alt : top;
+  return { ...pick, alternatives: ranked.filter((r) => r !== pick).slice(0, 2) };
+}
 
 self.onmessage = async (ev) => {
   const msg = ev.data;
-  if (msg.type !== 'analyze') return;
+  const { id, registry, devicePref } = msg;
 
-  const { id, garments, registry, devicePref } = msg;
   try {
-    const device = await pickDevice(devicePref);
-    progress('device', device === 'webgpu' ? 'Initializing WebGPU…' : 'Initializing WASM runtime…');
-
-    // Walk the registry until one model loads — this is the automatic
-    // fallback: if the preferred FashionCLIP can't run here, the next
-    // candidate takes over without the user seeing a difference.
-    let loaded = null;
-    const failures = [];
-    for (const entry of registry) {
-      try {
-        loaded = await loadModel(entry, device);
-        break;
-      } catch (err) {
-        failures.push(`${entry.id}: ${err?.message || err}`);
-        visionModel = null;
-        tokenizer = null;
-        processor = null;
-      }
-    }
-    if (!loaded) throw new Error(`No clothing model could be loaded. ${failures.join(' | ')}`);
-
-    await ensureTextVectors(loaded, device);
-
-    progress('analyze', 'Analyzing clothing…');
-    const results = [];
-    for (let i = 0; i < garments.length; i++) {
-      const g = garments[i];
-      progress('analyze', `Analyzing ${g.slot}…`, (i + 0.5) / garments.length);
-      const vec = await embedImage(g.bitmap);
-      const scores = scoreAxes(vec, g.slot);
-      results.push({
-        slot: g.slot,
-        itemId: g.itemId || null,
-        color: g.color || '',
-        hex: g.hex || '',
-        attributes: buildAttributes(g.slot, scores),
+    if (msg.type === 'classify') {
+      const { loaded, device } = await ensureLoaded(registry, devicePref);
+      progress('analyze', 'Identifying the item…');
+      const vec = await embedImage(msg.bitmap);
+      msg.bitmap.close?.();
+      const verdict = classifyGarment(vec, msg.slotHint);
+      post({
+        type: 'result', id, verdict,
+        model: { id: loaded.id, label: loaded.label, device },
       });
-      g.bitmap.close?.();
+      return;
     }
-
-    post({
-      type: 'result', id, results,
-      model: { id: loaded.id, label: loaded.label, device, fallback: failures.length > 0 },
-    });
   } catch (err) {
     post({ type: 'error', id, message: err?.message || String(err) });
   }

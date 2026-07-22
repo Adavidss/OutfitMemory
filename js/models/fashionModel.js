@@ -7,7 +7,6 @@
  */
 
 import { store } from '../store.js';
-import { segmentGarment } from '../segment.js';
 
 /**
  * Candidates, best first. The worker walks this list and uses the first
@@ -92,116 +91,51 @@ export function releaseModel() {
   pending.clear();
 }
 
-/* ---------- garment crops ---------- */
-
-/** Standard body zones, used when an outfit has no tagged items. */
-const ZONES = [
-  { slot: 'top', y: 0.26, h: 0.28 },
-  { slot: 'bottom', y: 0.55, h: 0.30 },
-  { slot: 'shoes', y: 0.87, h: 0.11 },
-];
-
-const CROP_EDGE = 336; // a little above CLIP's 224 input, leaves room to resize
-
-/** Decode an archive image path to a bitmap. */
-async function bitmapFor(path) {
-  const blob = await store.adapter.readFile(path);
-  if (!blob) return null;
-  return createImageBitmap(blob);
-}
-
-async function cropBitmap(source, rect) {
-  const scale = Math.min(1, CROP_EDGE / Math.max(rect.w, rect.h));
-  const w = Math.max(1, Math.round(rect.w * scale));
-  const h = Math.max(1, Math.round(rect.h * scale));
-  const c = document.createElement('canvas');
-  c.width = w; c.height = h;
-  const g = c.getContext('2d');
-  g.imageSmoothingQuality = 'high';
-  g.drawImage(source, rect.x, rect.y, rect.w, rect.h, 0, 0, w, h);
-  return createImageBitmap(c);
-}
-
-/**
- * Work out what to analyze for an outfit.
- * Tagged items win (the user already told us where the clothes are);
- * otherwise fall back to segmenting the standard body zones.
- */
-export async function collectGarments(entry) {
-  const tagged = store.itemsFor(entry);
-  const out = [];
-
-  if (tagged.length) {
-    for (const item of tagged) {
-      const bmp = item.thumb ? await bitmapFor(item.thumb) : null;
-      if (!bmp) continue;
-      out.push({
-        slot: item.category, itemId: item.id, name: item.name,
-        color: item.color || '', hex: item.hex || '', bitmap: bmp,
-      });
-    }
-    if (out.length) return out;
-  }
-
-  const photo = await bitmapFor(entry.image);
-  if (!photo) return out;
-  const NW = photo.width;
-  const NH = photo.height;
-
-  for (const zone of ZONES) {
-    const drawn = {
-      x: Math.round(NW * 0.22), y: Math.round(NH * zone.y),
-      w: Math.round(NW * 0.56), h: Math.round(NH * zone.h),
-    };
-    let seg = null;
-    try {
-      seg = segmentGarment(photo, NW, NH, drawn);
-    } catch { /* use the raw zone */ }
-    const rect = seg?.ok ? seg.bbox : drawn;
-    // A zone that segmented to almost nothing probably isn't a garment.
-    if (seg && !seg.ok && zone.slot === 'shoes') continue;
-    out.push({
-      slot: zone.slot,
-      itemId: null,
-      name: null,
-      color: seg?.colors?.[0] || '',
-      hex: seg?.palette?.[0]?.hex || '',
-      bitmap: await cropBitmap(photo, rect),
-    });
-  }
-  photo.close?.();
-  return out;
-}
-
 /* ---------- public API ---------- */
 
 /**
- * analyzeOutfit(entry, onProgress) → { results, model }
- * Each result: { slot, itemId, color, hex, attributes[] }
+ * Should the tagger auto-identify crops? Yes when the user enabled it in
+ * Settings, or when the model is already downloaded (using something that
+ * is already on disk costs nothing). Never triggers a surprise download.
  */
-export async function analyzeOutfit(entry, onProgress) {
-  const support = inferenceSupport();
-  if (!support.ok) throw new Error(support.reasons.join(' '));
+export async function classifierReady() {
+  if (store.settings.autoIdentify) return true;
+  try {
+    if (!('caches' in window)) return false;
+    const cache = await caches.open('transformers-cache');
+    return (await cache.keys()).length > 0;
+  } catch {
+    return false;
+  }
+}
 
-  const garments = await collectGarments(entry);
-  if (!garments.length) throw new Error('Could not read this outfit photo.');
+/**
+ * classifyCrop(bitmap, slotHint, onProgress) →
+ *   { garment, category, confidence, alternatives } | null
+ *
+ * One garment in, the single most probable label out. The bitmap is
+ * transferred to the worker (unusable afterwards).
+ */
+export async function classifyCrop(bitmap, slotHint = 'top', onProgress) {
+  const support = inferenceSupport();
+  if (!support.ok) return null;
 
   const w = ensureWorker();
   const id = ++seq;
 
-  return new Promise((resolve, reject) => {
+  const msg = await new Promise((resolve, reject) => {
     pending.set(id, { resolve, reject, onProgress });
     w.postMessage(
       {
-        type: 'analyze',
+        type: 'classify',
         id,
         registry: MODEL_REGISTRY,
         devicePref: hasWebGPU() ? 'auto' : 'wasm',
-        garments: garments.map((g) => ({
-          slot: g.slot, itemId: g.itemId, color: g.color, hex: g.hex, bitmap: g.bitmap,
-        })),
+        slotHint,
+        bitmap,
       },
-      garments.map((g) => g.bitmap), // transfer, don't copy
+      [bitmap],
     );
   });
+  return msg.verdict || null;
 }

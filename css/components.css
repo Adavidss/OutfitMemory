@@ -841,6 +841,17 @@
 .set-row.tappable:hover { background: color-mix(in srgb, var(--ink) 3%, transparent); }
 .set-row.danger, .set-row.danger svg { color: var(--danger); }
 .set-note { font-size: 12.5px; color: var(--ink-3); margin: 8px 6px 0; line-height: 1.5; }
+.key-field input {
+  width: 100%;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 9px 11px;
+  font-size: 13px;
+  outline: none;
+  color: var(--ink);
+}
+.key-field input:focus { border-color: var(--accent); }
 
 .theme-grid {
   display: grid;
@@ -1400,6 +1411,33 @@
   gap: 9px;
   border-top: 1px solid var(--line);
 }
+.builder-secondary { display: flex; gap: 9px; }
+.builder-secondary .btn { flex: 1; }
+
+/* planned outfits on the wardrobe tab */
+.plan-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 9px 4px;
+  border-radius: var(--radius-sm);
+}
+.plan-thumbs { display: flex; flex: none; }
+.plan-thumbs img {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-2);
+  border: 2px solid var(--surface);
+  margin-left: -10px;
+}
+.plan-thumbs img:first-child { margin-left: 0; }
+.plan-row .grow { min-width: 0; text-align: left; }
+.plan-row b { display: block; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.plan-row .sub { font-size: 12px; color: var(--ink-3); }
+.plan-actions { display: flex; gap: 2px; flex: none; }
 .icon-btn.on-accent { color: var(--accent); }
 
 /* ============================================================
@@ -1549,7 +1587,82 @@
 .sim-retailer:hover { border-color: var(--accent); }
 .sim-retailer:active { transform: scale(0.97); }
 
-.lb-find-btn { flex: none; }
+/* "More like this" strip in the outfit panel */
+.lb-similar { margin-top: 2px; }
+.lb-similar-row {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding-bottom: 4px;
+}
+.lb-similar-row::-webkit-scrollbar { display: none; }
+.lb-similar-card {
+  flex: none;
+  width: 64px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  align-items: center;
+  padding: 0;
+}
+.lb-similar-card img {
+  width: 64px;
+  height: 84px;
+  object-fit: cover;
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+.lb-similar-card span { font-size: 10.5px; color: var(--ink-3); font-weight: 600; }
+
+/* classifier verdict line in the item form */
+.item-form-id {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--ink-2);
+  margin-bottom: 2px;
+}
+.item-form-id svg { width: 15px; height: 15px; color: var(--accent); flex: none; }
+.item-form-id b { color: var(--ink); }
+
+/* where-to-buy dialog */
+.buy-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 16px calc(22px + var(--safe-b));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.buy-id-text {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 14px;
+  font-size: 14.5px;
+  white-space: pre-wrap;
+  line-height: 1.55;
+}
+.buy-links { display: flex; flex-direction: column; gap: 7px; }
+.buy-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 11px 13px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  transition: border-color 0.12s ease, transform 0.12s ease;
+}
+.buy-link:hover { border-color: var(--accent); }
+.buy-link:active { transform: scale(0.98); }
+.buy-link svg { width: 16px; height: 16px; color: var(--ink-3); flex: none; }
+.buy-link span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* ---------- Utility ---------- */
 .sr-only {

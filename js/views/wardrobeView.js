@@ -18,6 +18,8 @@ import {
 import { itemForm } from './itemTagger.js';
 import { openOutfitBuilder } from './outfitBuilder.js';
 import { openDetail } from './detail.js';
+import { hasGeminiKey, identifyItem } from '../search/whereToBuy.js';
+import { RETAILERS } from '../search/shoppingSearch.js';
 
 // Survives re-renders, not reloads.
 const filter = { q: '', cat: '', sort: 'recent' };
@@ -49,6 +51,9 @@ export function renderWardrobe(container) {
   buildBtn.disabled = !canSuggest();
   buildBtn.addEventListener('click', () => openOutfitBuilder());
   container.append(buildBtn);
+
+  const plansBox = plansCard(container);
+  if (plansBox) container.append(plansBox);
 
   container.append(filterBar(() => renderGrid(grid)));
   const grid = el('div', { class: 'item-grid' });
@@ -237,6 +242,14 @@ export function openItemDetail(id) {
           icon('link'), `View at ${linkHost(item.link)}`)
       : null;
 
+    /* Online lookup — only exists once the user configured their own key. */
+    let buyRow = null;
+    if (hasGeminiKey()) {
+      buyRow = el('button', { class: 'btn btn-block' }, icon('search'),
+        item.buy ? 'Where to buy (saved)' : 'Find where to buy');
+      buyRow.addEventListener('click', () => openWhereToBuy(item.id));
+    }
+
     /* pairs well with */
     const pairs = pairsWith(item.id);
     const pairsBox = pairs.length
@@ -282,6 +295,7 @@ export function openItemDetail(id) {
           swatch ? el('i', { class: 'item-hero-dot', style: { background: swatch } }) : null),
         tiles,
         linkRow,
+        buyRow,
         pairsBox,
         outfitBox));
   }
@@ -291,6 +305,116 @@ export function openItemDetail(id) {
     el('div', { class: 'tile-label', text: label }));
 
   render();
+}
+
+/* ---------- planned outfits ---------- */
+
+function plansCard(container) {
+  const plans = store.plans();
+  if (!plans.length) return null;
+
+  const rows = plans.slice(0, 6).map((plan) => {
+    const items = plan.items.map((id) => store.itemById(id)).filter(Boolean);
+    if (!items.length) return null;
+
+    const thumbs = el('span', { class: 'plan-thumbs' }, items.slice(0, 4).map((it) => {
+      const img = el('img', { alt: '' });
+      store.itemThumbURL(it).then((u) => { if (u) img.src = u; });
+      return img;
+    }));
+
+    const wear = el('button', { class: 'icon-btn', 'aria-label': 'Wear this plan today' }, icon('camera'));
+    wear.addEventListener('click', () => {
+      import('./capture.js').then(({ openCapture }) => openCapture({ items: plan.items }));
+    });
+    const del = el('button', { class: 'icon-btn', 'aria-label': 'Delete plan' }, icon('x'));
+    del.addEventListener('click', async () => {
+      await store.deletePlan(plan.id);
+      toast('Plan removed');
+    });
+
+    return el('div', { class: 'plan-row' }, thumbs,
+      el('span', { class: 'grow' },
+        el('b', { text: items.map((i) => i.name).join(' + ') }),
+        el('span', { class: 'sub', text: `saved ${new Date(plan.createdAt).toLocaleDateString()}` })),
+      el('span', { class: 'plan-actions' }, wear, del));
+  }).filter(Boolean);
+
+  if (!rows.length) return null;
+  return el('div', { class: 'card' },
+    el('div', { class: 'stat-card-title', text: 'Planned outfits' }), rows);
+}
+
+/* ---------- where to buy (Gemini, user's own key) ---------- */
+
+function openWhereToBuy(itemId) {
+  const item = store.itemById(itemId);
+  if (!item) return;
+
+  const body = el('div', { class: 'buy-body' });
+  const closeBtn = el('button', { class: 'icon-btn', 'aria-label': 'Close' }, icon('x'));
+  const root = el('div', { class: 'lightbox' },
+    el('div', { class: 'lb-top' },
+      closeBtn,
+      el('div', { class: 'lb-title' },
+        el('b', { text: 'Where to buy' }),
+        el('span', { text: item.name })),
+      el('span', { class: 'icon-btn-spacer' })),
+    body);
+  const { close } = openOverlay(root, { variant: 'full' });
+  closeBtn.addEventListener('click', close);
+
+  if (item.buy?.text) renderBuyResult(body, item, item.buy);
+  else runLookup(body, item);
+}
+
+async function runLookup(body, item) {
+  body.replaceChildren(el('div', { class: 'sim-loading' },
+    el('div', { class: 'spinner' }),
+    el('div', { class: 'sim-phase', text: 'Asking Gemini…' }),
+    el('div', { class: 'sim-detail', text: 'Only this item’s crop is sent — never the full photo.' })));
+  try {
+    const blob = item.thumb ? await store.adapter.readFile(item.thumb) : null;
+    if (!blob) throw new Error('This item has no crop image to look up.');
+    const result = await identifyItem(blob, { name: item.name, color: item.color });
+    const payload = { ...result, at: new Date().toISOString() };
+    await store.updateItem(item.id, { buy: payload });
+    renderBuyResult(body, store.itemById(item.id), payload);
+  } catch (err) {
+    body.replaceChildren(el('div', { class: 'empty' },
+      el('div', { class: 'empty-art' }, icon('info')),
+      el('h2', { text: 'Lookup failed' }),
+      el('p', { text: err?.message || 'Unknown error.' })));
+  }
+}
+
+function renderBuyResult(body, item, payload) {
+  body.replaceChildren();
+
+  const redo = el('button', { class: 'link-btn', text: 'Look up again' });
+  redo.addEventListener('click', () => runLookup(body, item));
+  body.append(el('div', { class: 'sim-meta' },
+    el('span', { text: `Gemini · ${new Date(payload.at).toLocaleDateString()}` }), redo));
+
+  body.append(el('div', { class: 'buy-id-text', text: payload.text }));
+
+  if (payload.links?.length) {
+    body.append(el('div', { class: 'stat-card-title', text: 'Sources found by search' }),
+      el('div', { class: 'buy-links' }, payload.links.map((l) =>
+        el('a', { class: 'buy-link', href: l.uri, target: '_blank', rel: 'noopener noreferrer' },
+          icon('link'), el('span', { text: l.title })))));
+  }
+
+  // Retailer searches using the model's own phrase (line 3 of its reply).
+  const phrase = (payload.text.split('\n').find((s) => /search/i.test(s)) || item.name)
+    .replace(/^[^:]*:\s*/, '').replace(/["""]/g, '').trim() || item.name;
+  body.append(el('div', { class: 'stat-card-title', text: `Search “${phrase}” yourself` }),
+    el('div', { class: 'sim-retailers' }, RETAILERS.map((r) =>
+      el('a', { class: 'sim-retailer', href: r.url(phrase), target: '_blank', rel: 'noopener noreferrer' },
+        el('span', { text: r.emoji }), r.name))));
+
+  body.append(el('p', { class: 'set-note',
+    text: 'Identification is AI-generated and may be wrong. Links are search results, not endorsements — check them like any web result.' }));
 }
 
 /* ---------- empty state ---------- */

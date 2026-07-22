@@ -11,7 +11,9 @@
 
 import { store } from '../store.js';
 import { cropToItem } from '../imagePipeline.js';
-import { segmentGarment } from '../segment.js';
+import { smartSegment } from '../segment.js';
+import { warmParser } from '../models/personParser.js';
+import { classifyCrop, classifierReady } from '../models/fashionModel.js';
 import { el, openOverlay, toast, sheet, haptic } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { NAME_HEX } from '../colors.js';
@@ -46,6 +48,7 @@ function paintedRect(img) {
 export function openItemTagger(entryId) {
   const entry = store.entryById(entryId);
   if (!entry) return;
+  warmParser(); // start the person-parser download while the photo decodes
 
   const img = el('img', { alt: 'Outfit photo', draggable: 'false' });
   const marquee = el('div', { class: 'tag-marquee', hidden: true });
@@ -220,11 +223,11 @@ async function createFromCrop(entryId, img, frac, onDone, onHighlight) {
     h: Math.round(frac.h * nh),
   };
 
-  // Smart select: snap the rough drag to the actual garment, ignoring the
-  // wearer's skin and the room behind them.
+  // Smart select: person-parser mask first (skin/hair excluded by pixel
+  // classification), color heuristics only as its fallback.
   let seg = null;
   try {
-    seg = segmentGarment(img, nw, nh, drawn);
+    seg = await smartSegment(img, nw, nh, drawn);
     onHighlight?.(seg);
   } catch {
     /* fall through to the drawn rectangle */
@@ -239,15 +242,32 @@ async function createFromCrop(entryId, img, frac, onDone, onHighlight) {
   }
 
   const color = crop.colors?.[0] || '';
-  // Categorize from where the DETECTED garment sits, not the rough drag.
-  const category = guessCategory({ y0: rect.y / nh, h: rect.h / nh });
-  const suggested = color
+  // Position gives the starting category; the classifier refines it below.
+  let category = guessCategory({ y0: rect.y / nh, h: rect.h / nh });
+  let suggested = color
     ? `${color[0].toUpperCase()}${color.slice(1)} ${catLabel(category).toLowerCase()}`
     : catLabel(category);
+
+  // Identify with FashionCLIP when it's available (already downloaded or
+  // enabled in Settings): the form then shows the top guess + probability.
+  let identified = null;
+  if (await classifierReady()) {
+    try {
+      const bmp = await createImageBitmap(crop.blob);
+      identified = await classifyCrop(bmp, category);
+    } catch { /* naming falls back to color+position */ }
+  }
+  if (identified?.garment) {
+    category = identified.category || category;
+    suggested = color
+      ? `${color[0].toUpperCase()}${color.slice(1)} ${identified.garment}`
+      : identified.garment[0].toUpperCase() + identified.garment.slice(1);
+  }
 
   const fields = await itemForm({
     title: 'New item',
     crop,
+    identified,
     initial: {
       name: suggested,
       category,
@@ -287,10 +307,11 @@ async function pickExisting(entryId, onDone) {
 /* ================= item form (create + edit) ================= */
 
 /**
- * itemForm({ title, crop, initial }) → fields | null
- * Shared by the tagger and the wardrobe editor.
+ * itemForm({ title, crop, initial, identified }) → fields | null
+ * Shared by the tagger and the wardrobe editor. `identified` is the
+ * classifier's verdict — the single top garment and its probability.
  */
-export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL = null } = {}) {
+export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL = null, identified = null } = {}) {
   return new Promise((resolve) => {
     let settled = false;
     const done = (v) => { if (!settled) { settled = true; resolve(v); } };
@@ -331,12 +352,23 @@ export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL =
     const saveBtn = el('button', { class: 'btn btn-hero btn-block' }, icon('check'), 'Save item');
     const cancelBtn = el('button', { class: 'sheet-cancel', text: 'Cancel' });
 
+    // The classifier's single best guess, with its probability, per request:
+    // "Sweater — 84% sure".
+    const idLine = identified?.garment
+      ? el('div', { class: 'item-form-id' },
+          icon('sparkles'),
+          el('span', {},
+            el('b', { text: identified.garment[0].toUpperCase() + identified.garment.slice(1) }),
+            ` — ${Math.round(identified.confidence * 100)}% sure`))
+      : null;
+
     const card = el('div', { class: 'sheet-card item-form', role: 'dialog', 'aria-label': title },
       el('div', { class: 'sheet-grip' }),
       el('div', { class: 'item-form-head' },
         (crop?.blob || thumbURL) ? preview : null,
         el('div', { class: 'grow' },
           el('div', { class: 'sheet-title', text: title }),
+          idLine,
           swatch ? el('div', { class: 'item-form-color' },
             el('i', { class: 'mini-dot', style: { background: swatch } }),
             el('span', { text: initial.color || 'color detected' })) : null)),
