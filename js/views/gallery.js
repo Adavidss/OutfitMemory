@@ -123,9 +123,22 @@ function filterBar(entries, onChange) {
     onChange();
   });
 
+  // Flashback lives here rather than in the top bar: it's a photo feature,
+  // and on this screen its shuffle icon can't be confused with the
+  // wardrobe's outfit builder.
+  const flashbackBtn = el('button', {
+    class: 'icon-btn', 'aria-label': 'Show a random outfit', title: 'Flashback',
+  }, icon('shuffle'));
+  flashbackBtn.addEventListener('click', () => {
+    const all = store.entries();
+    if (!all.length) return;
+    openDetail(all[Math.floor(Math.random() * all.length)].id);
+  });
+
   return el('div', { class: 'filters' },
     el('div', { class: 'search-row' },
       el('div', { class: 'search' }, icon('search'), searchInput),
+      flashbackBtn,
       densityBtn),
     chipRow);
 }

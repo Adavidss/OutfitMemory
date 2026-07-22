@@ -21,9 +21,19 @@ import { openCapture } from './capture.js';
 
 const SLOT_ORDER = ['outerwear', 'top', 'dress', 'bottom', 'shoes', 'accessory'];
 
-export function openOutfitBuilder() {
+/**
+ * openOutfitBuilder({ startWith }) — the shuffle/lock view.
+ *
+ * `startWith` is a list of items the user already chose in the wardrobe;
+ * they arrive pre-locked, so "shuffle" fills in the rest around them
+ * rather than throwing away the decisions they already made.
+ */
+export function openOutfitBuilder({ startWith = [] } = {}) {
   /** category → item (pinned by the user, kept across shuffles) */
   const locked = {};
+  for (const item of startWith) {
+    if (item && !locked[item.category]) locked[item.category] = item;
+  }
   let picks = {};
 
   const slotsBox = el('div', { class: 'builder-slots' });

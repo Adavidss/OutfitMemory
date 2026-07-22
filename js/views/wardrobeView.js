@@ -7,7 +7,7 @@
  */
 
 import { store } from '../store.js';
-import { el, mount, toast, confirmDialog, openOverlay, sheet } from '../ui/dom.js';
+import { el, mount, toast, confirmDialog, openOverlay, sheet, haptic } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { NAME_HEX } from '../colors.js';
 import { fmtLong, relDay } from '../util/dates.js';
@@ -21,10 +21,18 @@ import { openDetail } from './detail.js';
 import { hasGeminiKey, identifyItem } from '../search/whereToBuy.js';
 import { RETAILERS } from '../search/shoppingSearch.js';
 import { shareOutfit } from './shareOutfit.js';
+import { openCapture } from './capture.js';
 
 // Survives re-renders, not reloads. `wish` switches between the clothes you
 // own and the ones you want.
 const filter = { q: '', cat: '', sort: 'recent', wish: false };
+
+/**
+ * Outfit-building selection. When `on`, tapping a card adds/removes it
+ * instead of opening its detail — building an outfit is then just
+ * "tap the things you're wearing", with no separate screen to learn.
+ */
+const picking = { on: false, ids: new Set() };
 
 const SORTS = {
   recent: { label: 'Recently added', fn: (a, b) => (b.item.createdAt || '').localeCompare(a.item.createdAt || '') },
@@ -41,36 +49,35 @@ export function renderWardrobe(container) {
   const wished = store.items(true);
   if (!owned.length && !wished.length) return container.append(emptyState());
 
+  // One action in the header. Building an outfit lives on the card below,
+  // where there's room to say what it does.
   const addBtn = el('button', { class: 'icon-btn', 'aria-label': 'Add an item', title: 'Add an item' },
     icon('plus'));
   addBtn.addEventListener('click', () => openAddItem({ wish: filter.wish }));
 
-  // Quick shuffle right in the header — one tap from anywhere in the tab.
-  const quickBuild = el('button', {
-    class: 'icon-btn', 'aria-label': 'Build an outfit', title: 'Build an outfit',
-  }, icon('shuffle'));
-  quickBuild.addEventListener('click', () => {
-    if (!canSuggest()) return toast('Add a couple of items first ✨');
-    openOutfitBuilder();
-  });
+  const doneBtn = el('button', { class: 'btn btn-sm btn-primary', text: 'Done' });
+  doneBtn.addEventListener('click', () => { stopPicking(); renderWardrobe(container); });
 
   container.append(el('div', { class: 'view-head' },
-    el('h1', { class: 'view-title', text: 'Wardrobe' }),
-    el('div', { class: 'view-head-actions' }, quickBuild, addBtn)));
+    el('h1', { class: 'view-title', text: picking.on ? 'Pick your outfit' : 'Wardrobe' }),
+    picking.on ? doneBtn : addBtn));
 
   // Owned ⇄ Wishlist. The wishlist is deliberately separate: wanted items
-  // must never be suggested as something you could wear today.
-  const seg = el('div', { class: 'segmented', role: 'tablist' },
-    [[false, `Owned${owned.length ? ` ${owned.length}` : ''}`],
-     [true, `Wishlist${wished.length ? ` ${wished.length}` : ''}`]].map(([v, label]) => {
-      const b = el('button', {
-        class: `seg${filter.wish === v ? ' on' : ''}`, role: 'tab',
-        'aria-selected': filter.wish === v ? 'true' : 'false',
-      }, label);
-      b.addEventListener('click', () => { filter.wish = v; renderWardrobe(container); });
-      return b;
-    }));
-  container.append(seg);
+  // must never be suggested as something you could wear today. Hidden while
+  // picking — you can only wear what you own.
+  if (!picking.on) {
+    const seg = el('div', { class: 'segmented', role: 'tablist' },
+      [[false, `Owned${owned.length ? ` ${owned.length}` : ''}`],
+       [true, `Wishlist${wished.length ? ` ${wished.length}` : ''}`]].map(([v, label]) => {
+        const b = el('button', {
+          class: `seg${filter.wish === v ? ' on' : ''}`, role: 'tab',
+          'aria-selected': filter.wish === v ? 'true' : 'false',
+        }, label);
+        b.addEventListener('click', () => { filter.wish = v; renderWardrobe(container); });
+        return b;
+      }));
+    container.append(seg);
+  }
 
   const items = filter.wish ? wished : owned;
   if (!items.length) {
@@ -90,16 +97,20 @@ export function renderWardrobe(container) {
   }
 
   // Builder + plans + insights describe clothes you actually own.
-  if (!filter.wish) {
+  if (!filter.wish && !picking.on) {
     const buildBtn = el('button', { class: 'wardrobe-cta' },
       el('span', { class: 'grow' },
-        el('b', { text: 'Build an outfit' }),
+        el('b', { text: 'Create an outfit' }),
         el('span', { text: canSuggest()
-          ? 'Shuffle your own clothes into something to wear'
-          : 'Add a couple of items to unlock suggestions' })),
-      icon('shuffle'));
+          ? 'Tap the pieces you want — or shuffle for ideas'
+          : 'Add a couple of items to unlock this' })),
+      icon('sparkles'));
     buildBtn.disabled = !canSuggest();
-    buildBtn.addEventListener('click', () => openOutfitBuilder());
+    buildBtn.addEventListener('click', () => {
+      picking.on = true;
+      picking.ids.clear();
+      renderWardrobe(container);
+    });
     container.append(buildBtn);
 
     const plansBox = plansCard(container);
@@ -111,10 +122,12 @@ export function renderWardrobe(container) {
   container.append(grid);
   renderGrid(grid);
 
-  if (!filter.wish) {
+  if (picking.on) container.append(pickBar(container));
+
+  if (!filter.wish && !picking.on) {
     const ins = insightsCard();
     if (ins) container.append(ins);
-  } else {
+  } else if (filter.wish) {
     const total = items.reduce((s, i) => s + (Number.isFinite(i.price) ? i.price : 0), 0);
     if (total > 0) {
       container.append(el('div', { class: 'card' },
@@ -138,20 +151,30 @@ function filterBar(onChange) {
     deb = setTimeout(() => { filter.q = search.value; onChange(); }, 180);
   });
 
-  const sortSel = el('select', { 'aria-label': 'Sort items' },
-    Object.entries(SORTS).map(([k, s]) =>
-      el('option', { value: k, text: s.label, selected: filter.sort === k || null })));
-  sortSel.addEventListener('change', () => { filter.sort = sortSel.value; onChange(); });
+  // Sort is a rare, deliberate choice — an icon beside the search box that
+  // opens a list, rather than a permanent dropdown competing with the
+  // category chips for the same row.
+  const sortBtn = el('button', {
+    class: `icon-btn${filter.sort !== 'recent' ? ' on-accent' : ''}`,
+    'aria-label': `Sort: ${SORTS[filter.sort].label}`, title: `Sort: ${SORTS[filter.sort].label}`,
+  }, icon('chart'));
+  sortBtn.addEventListener('click', () => sheet({
+    title: 'Sort by',
+    actions: Object.entries(SORTS).map(([k, s]) => ({
+      label: `${filter.sort === k ? '✓ ' : ''}${s.label}`,
+      icon: 'chart',
+      onPick: () => { filter.sort = k; onChange(); },
+    })),
+  }));
 
   const used = new Set(store.items(filter.wish).map((i) => i.category));
   const chips = el('div', { class: 'chip-row' },
-    el('label', { class: 'chip active' }, icon('chart'), sortSel),
     CATEGORIES.filter((c) => used.has(c.id)).map((c) => {
       const chip = el('button', { class: `chip${filter.cat === c.id ? ' active' : ''}` },
         `${c.emoji} ${c.label}`);
       chip.addEventListener('click', () => {
         filter.cat = filter.cat === c.id ? '' : c.id;
-        chips.querySelectorAll('.chip').forEach((x, i) => { if (i) x.classList.remove('active'); });
+        chips.querySelectorAll('.chip').forEach((x) => x.classList.remove('active'));
         if (filter.cat) chip.classList.add('active');
         onChange();
       });
@@ -159,8 +182,92 @@ function filterBar(onChange) {
     }));
 
   return el('div', { class: 'filters' },
-    el('div', { class: 'search-row' }, el('div', { class: 'search' }, icon('search'), search)),
-    chips);
+    el('div', { class: 'search-row' },
+      el('div', { class: 'search' }, icon('search'), search),
+      sortBtn),
+    chips.children.length > 1 ? chips : null);
+}
+
+/* ---------- outfit picking ---------- */
+
+export function stopPicking() {
+  picking.on = false;
+  picking.ids.clear();
+}
+
+/** The items currently picked, in head-to-toe order. */
+function pickedItems() {
+  return [...picking.ids].map((id) => store.itemById(id)).filter(Boolean)
+    .sort((a, b) => CATEGORIES.findIndex((c) => c.id === a.category)
+      - CATEGORIES.findIndex((c) => c.id === b.category));
+}
+
+/**
+ * Sticky bar summarising the outfit being built. Everything you can do
+ * with the selection lives here, so the grid above stays uncluttered.
+ */
+function pickBar(container) {
+  const chosen = pickedItems();
+
+  const thumbs = el('div', { class: 'pickbar-thumbs' }, chosen.slice(0, 5).map((it) => {
+    const img = el('img', { alt: '' });
+    store.itemThumbURL(it).then((u) => { if (u) img.src = u; });
+    return img;
+  }));
+
+  const label = chosen.length
+    ? `${chosen.length} piece${chosen.length === 1 ? '' : 's'}`
+    : 'Tap pieces to add them';
+
+  const shuffleBtn = el('button', {
+    class: 'btn btn-sm', 'aria-label': chosen.length ? 'Shuffle the rest around these' : 'Shuffle an outfit',
+  }, icon('shuffle'), chosen.length ? 'Fill rest' : 'Shuffle');
+  shuffleBtn.addEventListener('click', () => {
+    // Hand the picks to the shuffle view pre-locked, so nothing already
+    // chosen gets thrown away.
+    const startWith = pickedItems();
+    stopPicking();
+    renderWardrobe(container);
+    openOutfitBuilder({ startWith });
+  });
+
+  const nextBtn = el('button', { class: 'btn btn-sm btn-hero' }, icon('check'), 'Use outfit');
+  nextBtn.disabled = !chosen.length;
+  nextBtn.addEventListener('click', () => {
+    const items = pickedItems();
+    sheet({
+      title: `${items.length} piece${items.length === 1 ? '' : 's'} selected`,
+      actions: [
+        {
+          label: 'Wear this today', icon: 'camera', sub: 'Take the photo now, pieces already tagged',
+          onPick: () => {
+            const ids = items.map((i) => i.id);
+            stopPicking();
+            renderWardrobe(container);
+            openCapture({ items: ids });
+          },
+        },
+        {
+          label: 'Save as idea', icon: 'heart', sub: 'Keep it for later without a photo',
+          onPick: async () => {
+            // Leave selection mode BEFORE saving: addPlan emits a change
+            // that re-renders the view, and it must render the normal
+            // wardrobe rather than the picker we're finished with.
+            const ids = items.map((i) => i.id);
+            stopPicking();
+            await store.addPlan(ids);
+            toast('Saved to planned outfits ✓');
+          },
+        },
+        { label: 'Share outfit', icon: 'share', onPick: () => shareOutfit(items) },
+      ],
+    });
+  });
+
+  return el('div', { class: 'pickbar' },
+    chosen.length ? thumbs : null,
+    el('span', { class: 'pickbar-label', text: label }),
+    el('span', { class: 'pickbar-actions' }, shuffleBtn, nextBtn));
 }
 
 function renderGrid(grid) {
@@ -190,18 +297,34 @@ function itemCard({ item, wears, costPerWear }) {
   const price = formatPrice(item.price, item.currency);
   const cpw = costPerWear != null ? `${formatPrice(costPerWear, item.currency)}/wear` : null;
 
-  const card = el('button', { class: 'item-card', 'aria-label': item.name },
+  const chosen = picking.on && picking.ids.has(item.id);
+
+  const card = el('button', {
+    class: `item-card${chosen ? ' picked' : ''}`,
+    'aria-label': item.name,
+    'aria-pressed': picking.on ? String(chosen) : null,
+  },
     el('div', { class: 'item-thumb-wrap' },
       img,
       el('span', { class: 'item-cat', text: catEmoji(item.category) }),
-      item.wish ? el('span', { class: 'item-wish', title: 'On your wishlist' }, icon('heart')) : null),
+      picking.on
+        ? el('span', { class: `item-check${chosen ? ' on' : ''}` }, chosen ? icon('check') : null)
+        : (item.wish ? el('span', { class: 'item-wish', title: 'On your wishlist' }, icon('heart')) : null)),
     el('div', { class: 'item-meta' },
       el('b', { class: 'item-name', text: item.name }),
       el('span', { class: 'item-sub', text: item.brand || catLabel(item.category) }),
       el('span', { class: 'item-stat' }, item.wish
         ? (price || 'wanted')
         : `${wears} wear${wears === 1 ? '' : 's'}${cpw ? ` · ${cpw}` : price ? ` · ${price}` : ''}`)));
-  card.addEventListener('click', () => openItemDetail(item.id));
+
+  card.addEventListener('click', () => {
+    if (!picking.on) return openItemDetail(item.id);
+    picking.ids.has(item.id) ? picking.ids.delete(item.id) : picking.ids.add(item.id);
+    haptic();
+    // Re-render just the view so the card state and the bar stay in step.
+    const view = card.closest('#view');
+    if (view) renderWardrobe(view);
+  });
   return card;
 }
 
@@ -267,18 +390,16 @@ export function openItemDetail(id) {
     const closeBtn = el('button', { class: 'icon-btn', 'aria-label': 'Close' }, icon('x'));
     closeBtn.addEventListener('click', close);
 
-    const editBtn = el('button', { class: 'icon-btn', 'aria-label': 'Edit item' }, icon('tag'));
-    editBtn.addEventListener('click', async () => {
+    const edit = async () => {
       const thumbURL = await store.itemThumbURL(item);
       const fields = await itemForm({ title: 'Edit item', initial: item, thumbURL });
       if (!fields) return;
       await store.updateItem(id, fields);
       toast('Item updated ✓');
       render();
-    });
+    };
 
-    const delBtn = el('button', { class: 'icon-btn', 'aria-label': 'Delete item' }, icon('trash'));
-    delBtn.addEventListener('click', async () => {
+    const remove = async () => {
       const ok = await confirmDialog({
         title: `Delete “${item.name}”?`,
         body: 'It will be removed from your wardrobe and untagged from every outfit. Your photos are not affected.',
@@ -288,7 +409,27 @@ export function openItemDetail(id) {
       await store.deleteItem(id);
       toast('Item deleted');
       close();
-    });
+    };
+
+    // Edit / move / delete behind one menu instead of three competing
+    // buttons: they're occasional actions, and the screen is about the item.
+    const moreBtn = el('button', { class: 'icon-btn', 'aria-label': 'More actions' }, icon('more'));
+    moreBtn.addEventListener('click', () => sheet({
+      title: item.name,
+      actions: [
+        { label: 'Edit details', icon: 'tag', onPick: edit },
+        {
+          label: item.wish ? 'I bought this — move to wardrobe' : 'Move to wishlist',
+          icon: item.wish ? 'check' : 'heart',
+          onPick: async () => {
+            await store.setWish(item.id, !item.wish);
+            toast(item.wish ? `“${item.name}” moved to your wardrobe ✓` : `“${item.name}” moved to your wishlist`);
+            render();
+          },
+        },
+        { label: 'Delete item', icon: 'trash', danger: true, onPick: remove },
+      ],
+    }));
 
     /* stats tiles — wear history is meaningless for something you don't own */
     const tiles = el('div', { class: 'tile-grid' },
@@ -301,30 +442,19 @@ export function openItemDetail(id) {
         ? tile(formatPrice(stats.costPerWear, item.currency), 'Cost per wear')
         : null);
 
-    /* buy / product link */
+    /* Shopping actions share one row instead of stacking full-width. */
     const href = safeUrl(item.link);
-    const linkRow = href
-      ? el('a', { class: 'btn btn-block', href, target: '_blank', rel: 'noopener noreferrer' },
-          icon('link'), `View at ${linkHost(item.link)}`)
-      : null;
-
-    /* Online lookup — only exists once the user configured their own key. */
-    let buyRow = null;
-    if (hasGeminiKey()) {
-      buyRow = el('button', { class: 'btn btn-block' }, icon('search'),
-        item.buy ? 'Where to buy (saved)' : 'Find where to buy');
-      buyRow.addEventListener('click', () => openWhereToBuy(item.id));
-    }
-
-    /* Wishlist ⇄ wardrobe */
-    const moveRow = el('button', { class: `btn btn-block${item.wish ? ' btn-hero' : ''}` },
-      icon(item.wish ? 'check' : 'heart'),
-      item.wish ? 'I bought this — move to wardrobe' : 'Move to wishlist');
-    moveRow.addEventListener('click', async () => {
-      await store.setWish(item.id, !item.wish);
-      toast(item.wish ? `“${item.name}” moved to your wardrobe ✓` : `“${item.name}” moved to your wishlist`);
-      render();
-    });
+    const shopBtns = [
+      href && el('a', { class: 'btn', href, target: '_blank', rel: 'noopener noreferrer' },
+        icon('link'), linkHost(item.link)),
+      hasGeminiKey() && (() => {
+        const b = el('button', { class: 'btn' }, icon('search'),
+          item.buy ? 'Where to buy' : 'Find where to buy');
+        b.addEventListener('click', () => openWhereToBuy(item.id));
+        return b;
+      })(),
+    ].filter(Boolean);
+    const shopRow = shopBtns.length ? el('div', { class: 'btn-row' }, shopBtns) : null;
 
     /* Tags + notes */
     const tagsBox = (item.tags || []).length
@@ -373,16 +503,14 @@ export function openItemDetail(id) {
         el('div', { class: 'lb-title' },
           el('b', { text: item.name }),
           el('span', { text: [item.brand, catLabel(item.category)].filter(Boolean).join(' · ') })),
-        el('div', { class: 'lb-top-actions' }, editBtn, delBtn)),
+        moreBtn),
       el('div', { class: 'item-detail' },
         el('div', { class: 'item-hero-wrap' }, img,
           swatch ? el('i', { class: 'item-hero-dot', style: { background: swatch } }) : null),
         tagsBox,
         notesBox,
         tiles,
-        linkRow,
-        buyRow,
-        moveRow,
+        shopRow,
         pairsBox,
         outfitBox));
   }
@@ -412,7 +540,7 @@ function plansCard(container) {
 
     const wear = el('button', { class: 'icon-btn', 'aria-label': 'Wear this plan today' }, icon('camera'));
     wear.addEventListener('click', () => {
-      import('./capture.js').then(({ openCapture }) => openCapture({ items: plan.items }));
+      openCapture({ items: plan.items });
     });
     const share = el('button', { class: 'icon-btn', 'aria-label': 'Share this outfit' }, icon('share'));
     share.addEventListener('click', () => shareOutfit(items, 'Outfit idea'));

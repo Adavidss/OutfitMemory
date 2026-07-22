@@ -1695,9 +1695,79 @@
 .item-form textarea.lb-notes { margin-bottom: 8px; }
 
 /* view header with action buttons */
-.view-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.view-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; }
 .view-head .view-title { margin-bottom: 0; }
 .view-head-actions { display: flex; gap: 2px; flex: none; }
+
+/* ---------- outfit picking (select items straight from the grid) ---------- */
+.item-card.picked { outline: 2px solid var(--accent); outline-offset: -2px; }
+.item-check {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  background: color-mix(in srgb, var(--ink) 30%, transparent);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+  display: grid;
+  place-items: center;
+  color: #fff;
+  transition: background 0.14s ease, transform 0.14s ease;
+}
+.item-check.on { background: var(--accent); border-color: var(--accent); transform: scale(1.06); }
+.item-check svg { width: 14px; height: 14px; stroke-width: 3; }
+
+/* Sticky summary of the outfit being built. */
+.pickbar {
+  position: sticky;
+  bottom: calc(84px + var(--safe-b));
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--tabbar-bg);
+  -webkit-backdrop-filter: blur(18px);
+  backdrop-filter: blur(18px);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow-2);
+  animation: fadeUp 0.22s ease both;
+}
+.pickbar-thumbs { display: flex; flex: none; }
+.pickbar-thumbs img {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--surface-2);
+  border: 2px solid var(--bg);
+  margin-left: -12px;
+}
+.pickbar-thumbs img:first-child { margin-left: 0; }
+/* Wraps to two rows: thumbs+count, then full-width actions. A single row
+   squeezed the label to "2…" on a 375px screen. */
+.pickbar { flex-wrap: wrap; }
+.pickbar-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pickbar-actions { display: flex; gap: 8px; flex: 1 1 100%; }
+.pickbar-actions .btn { flex: 1; padding: 10px 12px; }
+
+/* buttons sharing a row instead of stacking full-width */
+.btn-row { display: flex; gap: 8px; }
+.btn-row > * { flex: 1; min-width: 0; }
 
 /* owned ⇄ wishlist */
 .segmented {

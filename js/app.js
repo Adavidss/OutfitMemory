@@ -14,7 +14,7 @@ import { renderGallery } from './views/gallery.js';
 import { renderCalendar } from './views/calendar.js';
 import { renderStats } from './views/statsView.js';
 import { renderSettings } from './views/settingsView.js';
-import { renderWardrobe } from './views/wardrobeView.js';
+import { renderWardrobe, stopPicking } from './views/wardrobeView.js';
 import { renderOnboarding, renderLocked } from './views/onboarding.js';
 import { openCapture } from './views/capture.js';
 import { openDetail } from './views/detail.js';
@@ -64,6 +64,9 @@ function currentRoute() {
 function renderView() {
   if (store.status !== 'ready') return;
   const route = currentRoute();
+  // Leaving the wardrobe abandons a half-built outfit rather than letting
+  // selection mode lurk behind another tab.
+  if (route !== 'wardrobe') stopPicking();
   store.saveSettings({ lastView: route });
   for (const tab of $$tabs()) tab.classList.toggle('active', tab.dataset.route === route);
   $('#topbar')?.classList.toggle('on-settings', route === 'settings');
@@ -76,15 +79,6 @@ const $$tabs = () => [...document.querySelectorAll('.tab[data-route]')];
 
 function buildChrome() {
   const topbar = $('#topbar');
-
-  // Flashback: open a random outfit from the archive.
-  const shuffleBtn = el('button', { class: 'icon-btn', 'aria-label': 'Random outfit flashback', title: 'Flashback' },
-    icon('shuffle'));
-  shuffleBtn.addEventListener('click', () => {
-    const entries = store.entries();
-    if (!entries.length) return toast('Save an outfit first ✨');
-    openDetail(entries[Math.floor(Math.random() * entries.length)].id);
-  });
 
   // Streak chip doubles as a shortcut to Stats.
   const streakChip = el('button', { class: 'streak-chip', id: 'streakChip', hidden: true, 'aria-label': 'Current streak — open stats' });
@@ -103,9 +97,12 @@ function buildChrome() {
     else location.hash = '#/gallery';
   });
 
+  // Two controls, not four: the streak (→ Stats) and Settings. Flashback
+  // moved to the Photos screen, where it belongs — its shuffle icon was
+  // indistinguishable from the wardrobe's "build an outfit" shuffle.
   topbar.replaceChildren(el('div', { class: 'topbar-inner' },
     brand,
-    el('div', { class: 'topbar-right' }, streakChip, shuffleBtn, settingsBtn)));
+    el('div', { class: 'topbar-right' }, streakChip, settingsBtn)));
 
   const mkTab = (route) => {
     const v = VIEWS[route];
