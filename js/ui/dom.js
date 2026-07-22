@@ -43,6 +43,22 @@ export function el(tag, attrs = {}, ...children) {
   return node;
 }
 
+/**
+ * Append children to an existing node, skipping null / undefined / false.
+ *
+ * The native `append()` stringifies anything that isn't a Node, so a
+ * conditional child that evaluates to null renders the literal word
+ * "null" on screen. `el()` already guards against this — use `mount()`
+ * for any direct append whose arguments might be conditional.
+ */
+export function mount(parent, ...children) {
+  for (const c of children.flat(Infinity)) {
+    if (c == null || c === false) continue;
+    parent.append(c.nodeType ? c : document.createTextNode(String(c)));
+  }
+  return parent;
+}
+
 /* ---------- Overlay stack (Esc / back handling) ---------- */
 
 const stack = [];

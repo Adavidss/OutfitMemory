@@ -7,7 +7,7 @@
  */
 
 import { store } from '../store.js';
-import { el, toast, confirmDialog, openOverlay, sheet } from '../ui/dom.js';
+import { el, mount, toast, confirmDialog, openOverlay, sheet } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { NAME_HEX } from '../colors.js';
 import { fmtLong, relDay } from '../util/dates.js';
@@ -44,8 +44,19 @@ export function renderWardrobe(container) {
   const addBtn = el('button', { class: 'icon-btn', 'aria-label': 'Add an item', title: 'Add an item' },
     icon('plus'));
   addBtn.addEventListener('click', () => openAddItem({ wish: filter.wish }));
+
+  // Quick shuffle right in the header — one tap from anywhere in the tab.
+  const quickBuild = el('button', {
+    class: 'icon-btn', 'aria-label': 'Build an outfit', title: 'Build an outfit',
+  }, icon('shuffle'));
+  quickBuild.addEventListener('click', () => {
+    if (!canSuggest()) return toast('Add a couple of items first ✨');
+    openOutfitBuilder();
+  });
+
   container.append(el('div', { class: 'view-head' },
-    el('h1', { class: 'view-title', text: 'Wardrobe' }), addBtn));
+    el('h1', { class: 'view-title', text: 'Wardrobe' }),
+    el('div', { class: 'view-head-actions' }, quickBuild, addBtn)));
 
   // Owned ⇄ Wishlist. The wishlist is deliberately separate: wanted items
   // must never be suggested as something you could wear today.
@@ -85,7 +96,7 @@ export function renderWardrobe(container) {
         el('b', { text: 'Build an outfit' }),
         el('span', { text: canSuggest()
           ? 'Shuffle your own clothes into something to wear'
-          : 'Tag a top and a bottom to unlock suggestions' })),
+          : 'Add a couple of items to unlock suggestions' })),
       icon('shuffle'));
     buildBtn.disabled = !canSuggest();
     buildBtn.addEventListener('click', () => openOutfitBuilder());
@@ -203,7 +214,7 @@ function insightsCard() {
   const box = el('div', { class: 'stat-cards' });
 
   if (ins.priced) {
-    box.append(el('div', { class: 'card' },
+    mount(box, el('div', { class: 'card' },
       el('div', { class: 'stat-card-title', text: 'Closet value' }),
       el('div', { class: 'tile-value', text: formatPrice(ins.totalValue, store.settings.currency || 'USD') || '—' }),
       el('div', { class: 'tile-label',
@@ -226,7 +237,9 @@ function insightsCard() {
       })));
   };
 
-  box.append(
+  // mount() — not append() — because each list() is null when it has no
+  // rows, and native append would print the literal word "null".
+  mount(box,
     list('Best value — your hardest workers', ins.bestValue,
       (r) => `${formatPrice(r.costPerWear, r.item.currency)} per wear · ${r.wears} wears`),
     list('Worth a rewear', ins.dusty,
@@ -234,7 +247,7 @@ function insightsCard() {
     list('Was it worth it?', ins.worstValue,
       (r) => `${formatPrice(r.costPerWear, r.item.currency)} per wear · only ${r.wears} wear${r.wears === 1 ? '' : 's'}`),
   );
-  return box;
+  return box.children.length ? box : null;
 }
 
 /* ---------- item detail ---------- */

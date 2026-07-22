@@ -7,6 +7,7 @@
 
 import { store } from './store.js';
 import { fmtLong } from './util/dates.js';
+import { catLabel, formatPrice } from './wardrobe.js';
 
 const W = 1080;
 const H = 1620;
@@ -81,11 +82,35 @@ export async function buildOutfitCard(items, title = 'Outfit idea') {
     }
     g.restore();
 
+    // Name, then the details line (type · brand · price) beneath it.
     g.fillStyle = '#fff';
     g.textAlign = 'center';
-    g.font = '600 34px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
-    const name = item.name.length > 26 ? `${item.name.slice(0, 25)}…` : item.name;
-    g.fillText(name, cx + tileW / 2, cy + imgH + 50);
+    g.font = '600 33px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    g.fillText(ellipsize(item.name, 24), cx + tileW / 2, cy + imgH + 44);
+
+    const detail = [
+      catLabel(item.category),
+      item.brand,
+      formatPrice(item.price, item.currency),
+    ].filter(Boolean).join(' · ');
+    if (detail) {
+      g.globalAlpha = 0.82;
+      g.font = '500 26px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      g.fillText(ellipsize(detail, 32), cx + tileW / 2, cy + imgH + 80);
+      g.globalAlpha = 1;
+    }
+  }
+
+  // Total, when enough pieces are priced to make it meaningful.
+  const priced = list.filter((i) => Number.isFinite(i.price));
+  if (priced.length >= 2) {
+    const total = priced.reduce((s, i) => s + i.price, 0);
+    g.globalAlpha = 0.92;
+    g.font = '700 36px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+    g.fillText(
+      `${formatPrice(total, priced[0].currency)}${priced.length < list.length ? ' (priced items)' : ''}`,
+      W / 2, H - 118);
+    g.globalAlpha = 1;
   }
 
   g.globalAlpha = 0.85;
@@ -94,6 +119,28 @@ export async function buildOutfitCard(items, title = 'Outfit idea') {
   g.globalAlpha = 1;
 
   return new Promise((res) => c.toBlob(res, 'image/png'));
+}
+
+const ellipsize = (s, n) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
+
+/**
+ * Plain-text description of an outfit, for sharing or copying alongside
+ * (or instead of) the image — the part a photo can't carry.
+ */
+export function outfitSummary(items, title = 'Outfit idea') {
+  const lines = [title, ''];
+  for (const i of items.filter(Boolean)) {
+    const bits = [catLabel(i.category), i.brand, formatPrice(i.price, i.currency)].filter(Boolean);
+    lines.push(`• ${i.name}${bits.length ? ` — ${bits.join(' · ')}` : ''}`);
+    if (i.link) lines.push(`  ${i.link}`);
+  }
+  const priced = items.filter((i) => i && Number.isFinite(i.price));
+  if (priced.length >= 2) {
+    const total = priced.reduce((s, i) => s + i.price, 0);
+    lines.push('', `Total: ${formatPrice(total, priced[0].currency)}` +
+      (priced.length < items.length ? ' (priced items only)' : ''));
+  }
+  return lines.join('\n');
 }
 
 /** Build the card as a PNG blob for the given entry. */

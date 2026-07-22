@@ -484,6 +484,9 @@ export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL =
       wish ? 'Add to wishlist' : 'Save item');
     const cancelBtn = el('button', { class: 'sheet-cancel', text: 'Cancel' });
 
+    // Header and buttons stay put; only the fields scroll. On a short phone
+    // — or with the keyboard open — the whole card used to run off-screen
+    // and Save became unreachable.
     const card = el('div', { class: 'sheet-card item-form', role: 'dialog', 'aria-label': title },
       el('div', { class: 'sheet-grip' }),
       el('div', { class: 'item-form-head' },
@@ -493,19 +496,20 @@ export function itemForm({ title = 'Item', crop = null, initial = {}, thumbURL =
           swatch ? el('div', { class: 'item-form-color' },
             el('i', { class: 'mini-dot', style: { background: swatch } }),
             el('span', { text: initial.color || 'color detected' })) : null)),
-      el('label', { class: 'field' }, icon('sparkles'), name),
-      el('div', { class: 'form-label', text: 'Category' }),
-      catRow,
-      el('div', { class: 'form-label', text: 'Tags' }),
-      tagRow,
-      el('label', { class: 'field' }, icon('tag'), tagInput),
-      el('div', { class: 'form-label', text: 'Notes' }),
-      notes,
-      el('div', { class: 'cap-row' },
-        el('label', { class: 'field' }, icon('palette'), brand),
-        el('label', { class: 'field field-price' }, el('span', { class: 'cur', text: currencySymbol() }), price)),
-      el('label', { class: 'field' }, icon('link'), link),
-      saveBtn, cancelBtn);
+      el('div', { class: 'item-form-body' },
+        el('label', { class: 'field' }, icon('sparkles'), name),
+        el('div', { class: 'form-label', text: 'Category' }),
+        catRow,
+        el('div', { class: 'form-label', text: 'Tags' }),
+        tagRow,
+        el('label', { class: 'field' }, icon('tag'), tagInput),
+        el('div', { class: 'form-label', text: 'Notes' }),
+        notes,
+        el('div', { class: 'cap-row' },
+          el('label', { class: 'field' }, icon('palette'), brand),
+          el('label', { class: 'field field-price' }, el('span', { class: 'cur', text: currencySymbol() }), price)),
+        el('label', { class: 'field' }, icon('link'), link)),
+      el('div', { class: 'item-form-foot' }, saveBtn, cancelBtn));
 
     const { close } = openOverlay(card, { onClose: () => done(null) });
     cancelBtn.addEventListener('click', () => close());

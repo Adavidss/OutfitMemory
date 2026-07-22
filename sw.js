@@ -7,7 +7,7 @@
  * touch the network at all.
  */
 
-const CACHE = 'outfitmemory-v10';
+const CACHE = 'outfitmemory-v11';
 
 // On localhost, serve network-first so local development always sees fresh
 // files (cache still works as an offline fallback). Production stays

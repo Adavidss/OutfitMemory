@@ -213,28 +213,31 @@ export function suggestOutfit({ locked = {} } = {}) {
       .map((e) => comboKey(e.items))
   );
 
-  const hasDress = byCat('dress').length > 0;
-  const hasTopAndBottom = byCat('top').length > 0 && byCat('bottom').length > 0;
+  /**
+   * Every slot that has items is fair game — nothing is mutually
+   * exclusive. A dress usually stands in for a top, but "dress over
+   * trousers" and other layered combinations are real outfits, so the
+   * engine keeps a chance of producing them rather than forbidding them.
+   * Outerwear and accessories stay optional garnish.
+   */
+  const OPTIONAL = new Set(['outerwear', 'accessory']);
+  const SLOTS = ['outerwear', 'dress', 'top', 'bottom', 'shoes', 'accessory'];
 
   const build = () => {
-    // A dress replaces the top+bottom pair.
-    const useDress = locked.dress
-      ? true
-      : locked.top || locked.bottom
-        ? false
-        : hasDress && (!hasTopAndBottom || Math.random() < 0.3);
-
-    const slots = useDress
-      ? ['outerwear', 'dress', 'shoes', 'accessory']
-      : ['outerwear', 'top', 'bottom', 'shoes', 'accessory'];
-
     const picks = {};
-    for (const slot of slots) {
+    for (const slot of SLOTS) {
       if (locked[slot]) { picks[slot] = locked[slot]; continue; }
       const pool = byCat(slot);
       if (!pool.length) continue;
-      // Outerwear and accessories are optional garnish, not required.
-      if ((slot === 'outerwear' || slot === 'accessory') && Math.random() < 0.45) continue;
+      if (OPTIONAL.has(slot) && Math.random() < 0.45) continue;
+
+      // A dress is worn sometimes rather than every time, and when one is
+      // in play a separate top is usually (not always) redundant.
+      if (slot === 'dress' && !locked.dress) {
+        const hasSeparates = byCat('top').length && byCat('bottom').length;
+        if (hasSeparates && Math.random() > 0.3) continue;
+      }
+      if (slot === 'top' && picks.dress && Math.random() < 0.8) continue;
 
       const chosen = Object.values(picks);
       const scored = pool.map((item) => ({
@@ -261,8 +264,11 @@ export function suggestOutfit({ locked = {} } = {}) {
   return { picks, items: ordered, ids: ordered.map((i) => i.id) };
 }
 
-/** Have enough items been tagged for the builder to be useful? */
+/**
+ * Enough tagged to be worth shuffling? Deliberately permissive: any two
+ * owned pieces make a combination worth looking at. Requiring a specific
+ * pairing (top + bottom) locked people out of perfectly valid wardrobes.
+ */
 export function canSuggest() {
-  const cats = new Set(store.items().map((i) => i.category));
-  return (cats.has('top') && cats.has('bottom')) || cats.has('dress');
+  return store.items(false).length >= 2;
 }

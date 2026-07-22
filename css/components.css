@@ -503,6 +503,16 @@
   border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   padding: 10px 16px calc(18px + var(--safe-b));
   animation: slideUp 0.22s cubic-bezier(0.2, 0.9, 0.3, 1) both;
+  /* Long action lists (picking from a big wardrobe) must scroll rather
+     than run off the top of the screen. */
+  max-height: 88dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+/* Cancel stays reachable without scrolling to the end of a long list. */
+.sheet-cancel {
+  position: sticky;
+  bottom: 0;
 }
 .sheet-grip {
   width: 38px;
@@ -1165,7 +1175,30 @@
 .icon-btn-spacer { width: 40px; flex: none; }
 
 /* ---------- item form ---------- */
-.item-form { max-height: 92dvh; overflow-y: auto; }
+/* Fixed header + scrolling fields + pinned buttons, so the sheet always
+   fits the screen and Save is always reachable. */
+.item-form {
+  display: flex;
+  flex-direction: column;
+  max-height: 88dvh;
+  overflow: hidden;
+  padding-bottom: 0;
+}
+.item-form-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding-bottom: 4px;
+}
+.item-form-foot {
+  flex: none;
+  padding: 10px 0 calc(10px + var(--safe-b));
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+}
+.item-form-foot .sheet-cancel { margin-top: 8px; }
 .item-form-head { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; }
 .item-form-head .sheet-title { text-align: left; margin-bottom: 2px; }
 .item-form-thumb {
@@ -1661,9 +1694,10 @@
 }
 .item-form textarea.lb-notes { margin-bottom: 8px; }
 
-/* view header with an action button */
+/* view header with action buttons */
 .view-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .view-head .view-title { margin-bottom: 0; }
+.view-head-actions { display: flex; gap: 2px; flex: none; }
 
 /* owned ⇄ wishlist */
 .segmented {
