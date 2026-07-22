@@ -1,12 +1,13 @@
 /**
- * colors.js — lightweight dominant-color analysis.
+ * colors.js — named-color classification and dominant-color summaries.
  *
- * This is the first "analyzer" in what is designed to become a pluggable
- * analysis pipeline (see README → Future AI). It runs entirely on-device
- * on the already-decoded thumbnail canvas, costs ~1 ms, and fills the
- * `colors` / `palette` metadata fields that power stats, filtering and
- * Wrapped. A future embedding/segmentation model would slot in beside it
- * and simply write additional metadata fields.
+ * Two jobs:
+ *   1. classifyRGB()      — map a pixel to a clothing-ish color name
+ *   2. summarizeColors()  — turn weighted pixel samples into a palette
+ *
+ * Actually deciding WHICH pixels to look at is segment.js's job: skin and
+ * wall pixels have to be thrown out first, or an outfit photo reports the
+ * wearer's face as "beige" and the wall as the shirt color.
  */
 
 /** Representative hex for each named bucket (used for UI dots/swatches). */
@@ -16,6 +17,7 @@ export const NAME_HEX = {
   gray: '#8e8e93',
   beige: '#d3bd97',
   brown: '#7a5230',
+  olive: '#6b6a3f',
   red: '#d64545',
   orange: '#e8853d',
   yellow: '#e3c53a',
@@ -27,7 +29,7 @@ export const NAME_HEX = {
   pink: '#e37bae',
 };
 
-function rgbToHsl(r, g, b) {
+export function rgbToHsl(r, g, b) {
   r /= 255; g /= 255; b /= 255;
   const max = Math.max(r, g, b);
   const min = Math.min(r, g, b);
@@ -43,7 +45,7 @@ function rgbToHsl(r, g, b) {
 }
 
 /** Map an HSL pixel to a named clothing-ish color bucket. */
-function classify(h, s, l) {
+function classifyHSL(h, s, l) {
   if (l < 0.11) return 'black';
   if (l > 0.93 && s < 0.3) return 'white';
   if (s < 0.13) {
@@ -57,8 +59,11 @@ function classify(h, s, l) {
     if (s < 0.5 && l > 0.55) return 'beige';
     return 'orange';
   }
-  if (h < 68) {
-    if (l < 0.35) return 'brown';
+  // Yellow-green: muted and mid-dark reads as olive, a staple clothing
+  // color that would otherwise be lumped in with brown.
+  if (h < 75) {
+    if (s < 0.55 && l < 0.5) return 'olive';
+    if (l < 0.32) return 'brown';
     if (s < 0.45 && l > 0.6) return 'beige';
     return 'yellow';
   }
@@ -69,64 +74,84 @@ function classify(h, s, l) {
   return 'pink';
 }
 
+export function classifyRGB(r, g, b) {
+  const [h, s, l] = rgbToHsl(r, g, b);
+  return classifyHSL(h, s, l);
+}
+
 /**
- * extractColors(canvas, {inset}) → { colors: ['navy', …], palette: [{name, hex, share}] }
+ * summarizeColors(samples) → { colors: ['navy', …], palette: [{name,hex,share}] }
+ * `samples` is a flat array of [r, g, b, weight] tuples.
+ */
+export function summarizeColors(samples) {
+  const buckets = new Map();
+  let total = 0;
+  for (const [r, g, b, w = 1] of samples) {
+    const name = classifyRGB(r, g, b);
+    const bk = buckets.get(name) || { n: 0, r: 0, g: 0, b: 0 };
+    bk.n += w; bk.r += r * w; bk.g += g * w; bk.b += b * w;
+    buckets.set(name, bk);
+    total += w;
+  }
+  if (!total) return { colors: [], palette: [] };
+
+  const ranked = [...buckets.entries()]
+    .map(([name, bk]) => ({
+      name,
+      share: bk.n / total,
+      hex: '#' + [bk.r, bk.g, bk.b]
+        .map((v) => Math.round(v / bk.n).toString(16).padStart(2, '0'))
+        .join(''),
+    }))
+    .sort((a, b) => b.share - a.share);
+
+  const top = ranked.filter((r, i) => i === 0 || r.share >= 0.08).slice(0, 3);
+  return {
+    colors: top.map((t) => t.name),
+    palette: top.map((t) => ({ name: t.name, hex: t.hex, share: +t.share.toFixed(3) })),
+  };
+}
+
+/**
+ * extractColors(canvas, {inset}) → { colors, palette }
  *
- * Samples a center-weighted crop (outfit photos are usually a person mid-
- * frame against a wall/mirror, so margins are mostly background) and
- * histograms the pixels into named buckets. Pass `inset: false` when the
- * canvas is already a tight crop (a wardrobe item) and every pixel counts.
+ * Whole-image color read for an outfit photo. Delegates pixel selection to
+ * segment.js so skin and background never colour the result; falls back to
+ * a plain center-weighted sample if segmentation finds nothing usable.
  */
 export function extractColors(sourceCanvas, { inset = true } = {}) {
   try {
-    const S = 48;
-    const c = document.createElement('canvas');
-    c.width = c.height = S;
-    const g = c.getContext('2d', { willReadFrequently: true });
-    const sw = sourceCanvas.width;
-    const sh = sourceCanvas.height;
-    // Central 64% width, 80% height — trims wall/ceiling/floor margins.
-    if (inset) g.drawImage(sourceCanvas, sw * 0.18, sh * 0.1, sw * 0.64, sh * 0.8, 0, 0, S, S);
-    else g.drawImage(sourceCanvas, 0, 0, sw, sh, 0, 0, S, S);
-    const data = g.getImageData(0, 0, S, S).data;
-
-    const buckets = new Map();
-    let total = 0;
-    for (let y = 0; y < S; y++) {
-      for (let x = 0; x < S; x++) {
-        const i = (y * S + x) * 4;
-        if (data[i + 3] < 200) continue;
-        const r = data[i], gr = data[i + 1], b = data[i + 2];
-        const [h, s, l] = rgbToHsl(r, gr, b);
-        const name = classify(h, s, l);
-        // Weight the very center ×2 — that's where the outfit lives.
-        const dx = x / S - 0.5, dy = y / S - 0.5;
-        const w = dx * dx + dy * dy < 0.09 ? 2 : 1;
-        const bk = buckets.get(name) || { n: 0, r: 0, g: 0, b: 0 };
-        bk.n += w; bk.r += r * w; bk.g += gr * w; bk.b += b * w;
-        buckets.set(name, bk);
-        total += w;
-      }
-    }
-    if (!total) return { colors: [], palette: [] };
-
-    const ranked = [...buckets.entries()]
-      .map(([name, bk]) => ({
-        name,
-        share: bk.n / total,
-        hex: '#' + [bk.r, bk.g, bk.b]
-          .map((v) => Math.round(v / bk.n).toString(16).padStart(2, '0'))
-          .join(''),
-      }))
-      .sort((a, b) => b.share - a.share);
-
-    const top = ranked.filter((r, i) => i === 0 || r.share >= 0.08).slice(0, 3);
-    return {
-      colors: top.map((t) => t.name),
-      palette: top.map((t) => ({ name: t.name, hex: t.hex, share: +t.share.toFixed(3) })),
-    };
+    // Imported lazily to keep this module free of circular dependencies.
+    return garmentColorsOf(sourceCanvas, inset);
   } catch {
     // Color analysis is a nice-to-have; never let it block saving a photo.
     return { colors: [], palette: [] };
   }
+}
+
+// Wired up by segment.js at import time (avoids a circular static import).
+let garmentColorsOf = (canvas, inset) => rawSample(canvas, inset);
+
+export function _setGarmentSampler(fn) {
+  garmentColorsOf = fn;
+}
+
+/** Last-resort sampler: plain grid over the image (optionally inset). */
+export function rawSample(sourceCanvas, inset = true) {
+  const S = 48;
+  const c = document.createElement('canvas');
+  c.width = c.height = S;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  const sw = sourceCanvas.width;
+  const sh = sourceCanvas.height;
+  if (inset) g.drawImage(sourceCanvas, sw * 0.18, sh * 0.1, sw * 0.64, sh * 0.8, 0, 0, S, S);
+  else g.drawImage(sourceCanvas, 0, 0, sw, sh, 0, 0, S, S);
+  const data = g.getImageData(0, 0, S, S).data;
+
+  const samples = [];
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3] < 200) continue;
+    samples.push([data[i], data[i + 1], data[i + 2], 1]);
+  }
+  return summarizeColors(samples);
 }

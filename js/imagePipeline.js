@@ -14,6 +14,9 @@
  */
 
 import { extractColors } from './colors.js';
+// Side-effect import: registers the skin/background-aware sampler that
+// extractColors delegates to, so faces and walls stay out of palettes.
+import './segment.js';
 
 const LONG_EDGES = [1600, 1400, 1200]; // fall back smaller if size budget missed
 const QUALITIES = [0.86, 0.8, 0.72, 0.64, 0.58];
@@ -153,7 +156,7 @@ export async function processPhoto(file) {
  * the source's own pixel coordinates. Returns a small WebP crop plus the
  * colors detected inside it, ready for store.addItem().
  */
-export async function cropToItem(source, rect) {
+export async function cropToItem(source, rect, colorOverride = null) {
   const { mime, ext } = await getEncoder();
   const scale = Math.min(1, ITEM_EDGE / Math.max(rect.w, rect.h));
   const canvas = document.createElement('canvas');
@@ -163,8 +166,11 @@ export async function cropToItem(source, rect) {
   g.imageSmoothingQuality = 'high';
   g.drawImage(source, rect.x, rect.y, rect.w, rect.h, 0, 0, canvas.width, canvas.height);
   const blob = await toBlob(canvas, mime, ITEM_QUALITY);
-  // A crop is already tight around the garment — sample all of it.
-  const { colors, palette } = extractColors(canvas, { inset: false });
+  // Prefer colors from segmentation (it knows which pixels are fabric);
+  // otherwise read the crop, which still filters skin and background.
+  const { colors, palette } = colorOverride?.colors?.length
+    ? colorOverride
+    : extractColors(canvas, { inset: false });
   return { blob, ext, colors, palette, width: canvas.width, height: canvas.height };
 }
 

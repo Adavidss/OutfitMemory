@@ -11,12 +11,34 @@
 
 import { store } from '../store.js';
 import { cropToItem } from '../imagePipeline.js';
+import { segmentGarment } from '../segment.js';
 import { el, openOverlay, toast, sheet, haptic } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { NAME_HEX } from '../colors.js';
 import { CATEGORIES, catLabel, safeUrl } from '../wardrobe.js';
 
 const MIN_BOX = 0.045; // ignore accidental micro-drags (fraction of image)
+
+/**
+ * The painted area of an object-fit:contain image. The <img> element now
+ * fills its stage and letterboxes inside it, so the element's own rect is
+ * NOT the picture — every crop coordinate has to come from this.
+ */
+function paintedRect(img) {
+  const r = img.getBoundingClientRect();
+  const nw = img.naturalWidth;
+  const nh = img.naturalHeight;
+  if (!nw || !nh) return { left: r.left, top: r.top, width: r.width, height: r.height };
+  const scale = Math.min(r.width / nw, r.height / nh);
+  const width = nw * scale;
+  const height = nh * scale;
+  return {
+    left: r.left + (r.width - width) / 2,
+    top: r.top + (r.height - height) / 2,
+    width,
+    height,
+  };
+}
 
 /* ================= tagger ================= */
 
@@ -27,11 +49,13 @@ export function openItemTagger(entryId) {
 
   const img = el('img', { alt: 'Outfit photo', draggable: 'false' });
   const marquee = el('div', { class: 'tag-marquee', hidden: true });
-  const stage = el('div', { class: 'tag-stage' }, img, marquee);
+  // Overlay that highlights the garment smart-select actually found.
+  const highlight = el('canvas', { class: 'tag-highlight' });
+  const stage = el('div', { class: 'tag-stage' }, img, highlight, marquee);
   const chipRow = el('div', { class: 'tag-chips' });
 
   const hint = el('p', { class: 'tag-hint' },
-    icon('sparkles'), 'Drag a box around one piece of clothing');
+    icon('sparkles'), 'Drag roughly over a piece — it snaps to the garment');
 
   const pickBtn = el('button', { class: 'btn btn-sm' }, icon('grid'), 'From wardrobe');
   const doneBtn = el('button', { class: 'btn btn-sm btn-primary' }, icon('check'), 'Done');
@@ -77,29 +101,58 @@ export function openItemTagger(entryId) {
   /* ---------- drag to select ---------- */
   let start = null;
 
-  const imgBox = () => img.getBoundingClientRect();
+  const imgBox = () => paintedRect(img);
 
   const clampToImage = (cx, cy) => {
     const r = imgBox();
     return {
-      x: Math.min(Math.max(cx, r.left), r.right),
-      y: Math.min(Math.max(cy, r.top), r.bottom),
+      x: Math.min(Math.max(cx, r.left), r.left + r.width),
+      y: Math.min(Math.max(cy, r.top), r.top + r.height),
     };
   };
 
   const drawMarquee = (a, b) => {
-    const r = imgBox();
+    const sr = stage.getBoundingClientRect();
     marquee.hidden = false;
-    marquee.style.left = `${Math.min(a.x, b.x) - r.left + img.offsetLeft}px`;
-    marquee.style.top = `${Math.min(a.y, b.y) - r.top + img.offsetTop}px`;
+    marquee.style.left = `${Math.min(a.x, b.x) - sr.left}px`;
+    marquee.style.top = `${Math.min(a.y, b.y) - sr.top}px`;
     marquee.style.width = `${Math.abs(a.x - b.x)}px`;
     marquee.style.height = `${Math.abs(a.y - b.y)}px`;
   };
 
+  /** Paint the detected garment mask over the photo, then fade it out. */
+  function showHighlight(seg) {
+    if (!seg?.mask) return;
+    const sr = stage.getBoundingClientRect();
+    highlight.width = Math.round(sr.width);
+    highlight.height = Math.round(sr.height);
+    const g = highlight.getContext('2d');
+    g.clearRect(0, 0, highlight.width, highlight.height);
+
+    // Mask lives in work-space; scale it onto the painted picture.
+    const pr = imgBox();
+    const cell = document.createElement('canvas');
+    cell.width = seg.maskW; cell.height = seg.maskH;
+    const cg = cell.getContext('2d');
+    const px = cg.createImageData(seg.maskW, seg.maskH);
+    for (let p = 0; p < seg.mask.length; p++) {
+      if (!seg.mask[p]) continue;
+      const i = p * 4;
+      px.data[i] = 124; px.data[i + 1] = 92; px.data[i + 2] = 255; px.data[i + 3] = 150;
+    }
+    cg.putImageData(px, 0, 0);
+
+    g.imageSmoothingEnabled = true;
+    g.drawImage(cell, pr.left - sr.left, pr.top - sr.top, pr.width, pr.height);
+    highlight.classList.add('on');
+    setTimeout(() => highlight.classList.remove('on'), 1100);
+  }
+
   stage.addEventListener('pointerdown', (ev) => {
     if (!img.naturalWidth) return;
     const r = imgBox();
-    if (ev.clientX < r.left || ev.clientX > r.right || ev.clientY < r.top || ev.clientY > r.bottom) return;
+    if (ev.clientX < r.left || ev.clientX > r.left + r.width ||
+        ev.clientY < r.top || ev.clientY > r.top + r.height) return;
     ev.preventDefault();
     // Capture keeps the drag alive if the finger leaves the stage; it's an
     // optimization, not a requirement, so a rejection must not break the drag.
@@ -126,16 +179,17 @@ export function openItemTagger(entryId) {
     let w = Math.abs(from.x - end.x) / r.width;
     let h = Math.abs(from.y - end.y) / r.height;
 
-    // A tap (rather than a drag) means "grab a sensible box around here".
+    // A tap (rather than a drag) means "grab a sensible box around here" —
+    // smart select then grows it out to the garment's real edges.
     if (w < MIN_BOX || h < MIN_BOX) {
       const cx = (from.x - r.left) / r.width;
       const cy = (from.y - r.top) / r.height;
-      w = 0.42; h = 0.24;
+      w = 0.30; h = 0.16;
       x0 = Math.min(Math.max(cx - w / 2, 0), 1 - w);
       y0 = Math.min(Math.max(cy - h / 2, 0), 1 - h);
     }
     haptic();
-    await createFromCrop(entryId, img, { x0, y0, w, h }, renderChips);
+    await createFromCrop(entryId, img, { x0, y0, w, h }, renderChips, showHighlight);
   };
 
   stage.addEventListener('pointerup', finish);
@@ -156,22 +210,37 @@ function guessCategory({ y0, h }) {
   return 'shoes';
 }
 
-async function createFromCrop(entryId, img, frac, onDone) {
-  const rect = {
-    x: Math.round(frac.x0 * img.naturalWidth),
-    y: Math.round(frac.y0 * img.naturalHeight),
-    w: Math.round(frac.w * img.naturalWidth),
-    h: Math.round(frac.h * img.naturalHeight),
+async function createFromCrop(entryId, img, frac, onDone, onHighlight) {
+  const nw = img.naturalWidth;
+  const nh = img.naturalHeight;
+  const drawn = {
+    x: Math.round(frac.x0 * nw),
+    y: Math.round(frac.y0 * nh),
+    w: Math.round(frac.w * nw),
+    h: Math.round(frac.h * nh),
   };
+
+  // Smart select: snap the rough drag to the actual garment, ignoring the
+  // wearer's skin and the room behind them.
+  let seg = null;
+  try {
+    seg = segmentGarment(img, nw, nh, drawn);
+    onHighlight?.(seg);
+  } catch {
+    /* fall through to the drawn rectangle */
+  }
+  const rect = seg?.ok ? seg.bbox : drawn;
+
   let crop;
   try {
-    crop = await cropToItem(img, rect);
+    crop = await cropToItem(img, rect, seg);
   } catch {
     return toast('Could not read that part of the photo');
   }
 
   const color = crop.colors?.[0] || '';
-  const category = guessCategory(frac);
+  // Categorize from where the DETECTED garment sits, not the rough drag.
+  const category = guessCategory({ y0: rect.y / nh, h: rect.h / nh });
   const suggested = color
     ? `${color[0].toUpperCase()}${color.slice(1)} ${catLabel(category).toLowerCase()}`
     : catLabel(category);

@@ -94,10 +94,17 @@ function buildChrome() {
     icon('settings'));
   settingsBtn.addEventListener('click', () => { location.hash = '#/settings'; });
 
+  // The wordmark is a home button — tapping it returns to Photos.
+  const brand = el('button', { class: 'brand', 'aria-label': 'Go to Photos', title: 'Photos' },
+    el('span', { class: 'brand-logo' }, icon('cameraHeart')),
+    'OutfitMemory');
+  brand.addEventListener('click', () => {
+    if (currentRoute() === 'gallery') window.scrollTo({ top: 0, behavior: 'smooth' });
+    else location.hash = '#/gallery';
+  });
+
   topbar.replaceChildren(el('div', { class: 'topbar-inner' },
-    el('div', { class: 'brand' },
-      el('span', { class: 'brand-logo' }, icon('cameraHeart')),
-      'OutfitMemory'),
+    brand,
     el('div', { class: 'topbar-right' }, streakChip, shuffleBtn, settingsBtn)));
 
   const mkTab = (route) => {
