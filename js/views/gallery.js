@@ -29,12 +29,48 @@ export function renderGallery(container) {
     return;
   }
 
+  const nudge = todayNudge();
+  if (nudge) container.append(nudge);
+
   const banner = memoryBanner();
   if (banner) container.append(banner);
 
   const list = el('div');
   container.append(filterBar(entries, () => renderList(list)), list);
   renderList(list);
+}
+
+/* ---------- daily nudge ---------- */
+
+/**
+ * A gentle, dismissible prompt to log today's outfit — the app's whole
+ * point is the daily habit, so surfacing it (once, quietly) when today is
+ * still empty helps without nagging. Never shown after a save or dismiss.
+ */
+function todayNudge() {
+  const today = todayStr();
+  if (store.settings.nudgeDismissed === today) return null;
+  if (store.entriesByDate(today).length) return null; // already logged today
+
+  const { current } = store.streaks();
+  const add = el('button', { class: 'nudge-add' }, icon('camera'), 'Add');
+  add.addEventListener('click', () => openCapture());
+
+  const close = el('button', { class: 'icon-btn nudge-close', 'aria-label': 'Dismiss' }, icon('x'));
+
+  const nudge = el('div', { class: 'nudge' },
+    el('span', { class: 'nudge-emoji', text: '📸' }),
+    el('span', { class: 'grow' },
+      el('b', { text: current >= 1 ? `Keep your ${current}-day streak going` : "Log today's outfit" }),
+      el('span', { class: 'nudge-sub', text: 'One photo — takes a few seconds.' })),
+    add, close);
+
+  close.addEventListener('click', (e) => {
+    e.stopPropagation();
+    store.saveSettings({ nudgeDismissed: today });
+    nudge.remove();
+  });
+  return nudge;
 }
 
 /* ---------- filters ---------- */

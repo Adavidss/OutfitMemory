@@ -40,7 +40,7 @@ const THEME_BG = {
 /* ---------- theme ---------- */
 
 export function applyTheme() {
-  const pref = store.settings.theme || 'auto';
+  const pref = store.settings.theme || 'polaroid';
   const resolved = pref === 'auto'
     ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
     : pref;
@@ -50,7 +50,7 @@ export function applyTheme() {
 }
 
 matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', () => {
-  if ((store.settings.theme || 'auto') === 'auto') applyTheme();
+  if ((store.settings.theme || 'polaroid') === 'auto') applyTheme();
 });
 
 /* ---------- routing ---------- */
@@ -164,6 +164,38 @@ function handlePendingAction() {
   }
 }
 
+/**
+ * Desktop keyboard shortcuts — a pure convenience layer over controls that
+ * are all still tappable. Deliberately inert while typing or when any
+ * overlay is open (so the lightbox keeps its own arrow-key navigation).
+ */
+function installShortcuts() {
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (store.status !== 'ready' || $('#app').hidden) return;
+    // Don't hijack typing or an open sheet/lightbox/capture overlay.
+    const t = e.target;
+    if (t && (t.matches?.('input, textarea, select') || t.isContentEditable)) return;
+    if ($('#layer')?.childElementCount) return;
+
+    switch (e.key) {
+      case 'n': e.preventDefault(); openCapture(); break;
+      case '/':
+        if (currentRoute() === 'gallery') {
+          e.preventDefault();
+          $('#view .search input')?.focus();
+        }
+        break;
+      case ',': e.preventDefault(); location.hash = '#/settings'; break;
+      case '1': case '2': case '3': case '4': {
+        const route = TABS[Number(e.key) - 1];
+        if (route) { e.preventDefault(); location.hash = `#/${route}`; }
+        break;
+      }
+    }
+  });
+}
+
 async function boot() {
   applyTheme();
   const status = await store.init();
@@ -186,6 +218,7 @@ async function boot() {
   });
 
   window.addEventListener('hashchange', renderView);
+  installShortcuts();
 
   // Offline support. Registration is skipped on file:// (dev convenience).
   if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {

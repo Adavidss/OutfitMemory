@@ -6,7 +6,7 @@
 (function () {
   try {
     var s = JSON.parse(localStorage.getItem('om.settings') || '{}');
-    var t = s.theme || 'auto';
+    var t = s.theme || 'polaroid';
     if (t === 'auto') {
       t = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
     }

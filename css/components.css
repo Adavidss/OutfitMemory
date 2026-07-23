@@ -149,6 +149,60 @@
 }
 
 /* ---------- Memory banner ---------- */
+/* ---------- daily "log today" nudge ---------- */
+.nudge {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--brand-grad);
+  color: #fff;
+  border-radius: var(--radius-lg);
+  padding: 12px 12px 12px 15px;
+  margin-bottom: 16px;
+  box-shadow: 0 6px 18px rgba(124, 92, 255, 0.28);
+  animation: fadeUp 0.3s ease both;
+}
+.nudge-emoji { font-size: 22px; flex: none; }
+.nudge .grow { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.nudge b { font-size: 15px; font-weight: 700; }
+.nudge-sub { font-size: 12.5px; opacity: 0.9; }
+.nudge-add {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+  background: #fff;
+  border-radius: 999px;
+  padding: 8px 14px;
+  transition: transform 0.12s ease;
+}
+.nudge-add:active { transform: scale(0.95); }
+.nudge-add svg { width: 16px; height: 16px; }
+.nudge-close { flex: none; color: #fff; width: 32px; height: 32px; }
+.nudge-close:hover { background: rgba(255, 255, 255, 0.18); }
+
+/* ---------- double-tap heart burst (outfit detail) ---------- */
+.heart-burst {
+  position: absolute;
+  z-index: 5;
+  transform: translate(-50%, -50%);
+  color: #fff;
+  pointer-events: none;
+  filter: drop-shadow(0 2px 8px rgba(0, 0, 0, 0.4));
+  animation: heartPop 0.9s cubic-bezier(0.2, 0.8, 0.3, 1) both;
+}
+.heart-burst svg { width: 96px; height: 96px; }
+@keyframes heartPop {
+  0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+  25% { opacity: 1; transform: translate(-50%, -50%) scale(1.05); }
+  45% { transform: translate(-50%, -50%) scale(0.92); }
+  70% { opacity: 1; transform: translate(-50%, -55%) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -80%) scale(0.95); }
+}
+
 .memory-banner {
   position: relative;
   display: flex;

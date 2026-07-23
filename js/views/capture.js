@@ -103,7 +103,8 @@ async function handleFile(file, opts) {
 
 function openPreview(processed, opts) {
   const previewUrl = URL.createObjectURL(processed.blob);
-  let favorite = false;
+  // opts.favorite / opts.notes pre-fill the form (e.g. "Wear this again").
+  let favorite = !!opts.favorite;
 
   const img = el('img', { src: previewUrl, alt: 'Outfit preview' });
 
@@ -115,12 +116,14 @@ function openPreview(processed, opts) {
   });
   const noteInput = el('input', {
     type: 'text',
+    value: opts.notes || '',
     placeholder: 'Add a note (optional)',
     'aria-label': 'Note',
     maxlength: '300',
   });
 
-  const favBtn = el('button', { class: 'fav-toggle', 'aria-label': 'Mark as favorite' }, icon('heart'));
+  const favBtn = el('button', { class: `fav-toggle${favorite ? ' on' : ''}`, 'aria-label': 'Mark as favorite' },
+    icon(favorite ? 'heartFill' : 'heart'));
   favBtn.addEventListener('click', () => {
     favorite = !favorite;
     favBtn.classList.toggle('on', favorite);

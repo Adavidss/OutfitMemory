@@ -5,12 +5,13 @@
  */
 
 import { store } from '../store.js';
-import { el, toast, actionToast, confirmDialog, sheet, openOverlay } from '../ui/dom.js';
+import { el, toast, actionToast, confirmDialog, sheet, openOverlay, haptic } from '../ui/dom.js';
 import { icon } from '../ui/icons.js';
 import { fmtLong, relDay } from '../util/dates.js';
 import { buildMemoryCard } from '../shareCard.js';
 import { openItemTagger } from './itemTagger.js';
 import { openItemDetail } from './wardrobeView.js';
+import { openCapture } from './capture.js';
 
 export function openDetail(id, contextIds) {
   const ids = contextIds?.length ? [...contextIds] : store.entries().map((e) => e.id);
@@ -56,6 +57,27 @@ export function openDetail(id, contextIds) {
       touchX = null;
       if (Math.abs(dx) > 48) nav(dx > 0 ? -1 : 1);
     }, { passive: true });
+
+    // Double-tap the photo to favorite it — Instagram-style, with a heart
+    // burst. Always favorites (never un-favorites); the heart button is
+    // there for toggling off.
+    let lastTap = 0;
+    img.addEventListener('click', async (e) => {
+      const now = Date.now();
+      if (now - lastTap < 300) {
+        lastTap = 0;
+        const cur = store.entryById(entry.id);
+        if (cur && !cur.favorite) {
+          await store.toggleFavorite(entry.id);
+          favBtn.classList.add('on');
+          favBtn.replaceChildren(icon('heartFill'));
+        }
+        heartBurst(stage, e);
+        haptic();
+      } else {
+        lastTap = now;
+      }
+    });
 
     const notes = el('textarea', {
       class: 'lb-notes', rows: '2', placeholder: 'Add a note about this look…',
@@ -146,6 +168,16 @@ export function openDetail(id, contextIds) {
     const dlBtn = el('button', { class: 'icon-btn', 'aria-label': 'Download photo' }, icon('download'));
     dlBtn.addEventListener('click', () => downloadEntry(entry));
 
+    // Wear this outfit again: start a fresh capture for today with the same
+    // pieces already tagged (and note carried over as a starting point).
+    const againBtn = el('button', { class: 'icon-btn', 'aria-label': 'Wear this outfit again', title: 'Wear again' },
+      icon('refresh'));
+    againBtn.addEventListener('click', () => {
+      const items = [...(entry.items || [])];
+      close();
+      openCapture({ items, notes: entry.notes || '' });
+    });
+
     const delBtn = el('button', { class: 'icon-btn', 'aria-label': 'Delete outfit' }, icon('trash'));
     delBtn.addEventListener('click', async () => {
       const ok = await confirmDialog({
@@ -178,7 +210,7 @@ export function openDetail(id, contextIds) {
         favBtn),
       stage,
       el('div', { class: 'lb-panel' },
-        el('div', { class: 'lb-actions' }, shareBtn, dlBtn, delBtn),
+        el('div', { class: 'lb-actions' }, againBtn, shareBtn, dlBtn, delBtn),
         itemRow,
         notes,
         tags,
@@ -202,6 +234,17 @@ export function openDetail(id, contextIds) {
   const detachKeys = () => document.removeEventListener('keydown', onKey);
 
   render();
+}
+
+/** A heart that pops where the user double-tapped, then fades. */
+function heartBurst(stage, ev) {
+  const r = stage.getBoundingClientRect();
+  const x = (ev?.clientX ?? r.left + r.width / 2) - r.left;
+  const y = (ev?.clientY ?? r.top + r.height / 2) - r.top;
+  const heart = el('div', { class: 'heart-burst', style: { left: `${x}px`, top: `${y}px` } },
+    icon('heartFill'));
+  stage.append(heart);
+  setTimeout(() => heart.remove(), 900);
 }
 
 async function shareEntry(entry) {

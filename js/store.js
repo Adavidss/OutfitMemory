@@ -40,11 +40,12 @@ const SETTINGS_KEY = 'om.settings';
 const META_CACHE_KEY = 'om.metaCache';
 
 const DEFAULT_SETTINGS = {
-  theme: 'auto',          // auto | light | dark | mono | magazine | polaroid
+  theme: 'polaroid',      // auto | light | dark | mono | magazine | polaroid (default: scrapbook)
   setupDone: false,
   storageKind: null,      // 'folder' | 'browser'
   lastView: 'gallery',
   memoryDismissed: '',    // date the "on this day" banner was dismissed
+  nudgeDismissed: '',     // date the "log today" nudge was dismissed
   gridDensity: 'cozy',    // 'cozy' | 'compact' gallery grid
   backup: { preset: 'off', lastRun: '', folderName: '' }, // see js/backup.js
   geminiKey: '',          // user's own key for optional online lookup (never exported)
